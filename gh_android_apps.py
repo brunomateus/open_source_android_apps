@@ -24,6 +24,7 @@ SUB_COMMANDS = [
     'get_gradle_files',
     'add_gradle_info',
     'clone',
+    'draw_commits',
     ]
 
 

@@ -122,12 +122,32 @@ class Repo(Repository):
             return 1
         return int(page_arg[0])
 
-    def count_commits(self):
+    def has_n_commits(self, n_commits: int) -> bool:
+        """Test if repository has at least n_commits.
+
+        :param int n_commits:
+            Number of commits that repository should have.
+        :returns bool:
+            True if repository has at least n_commits, otherwise False.
+        """
+        return self.count_commits(stop_at=n_commits) >= n_commits
+
+    def count_commits(self, stop_at: int = -1):
         """Count commits in main branch of this repository.
 
+        This takes at most two requests to Github API.
+
+        :param int stop_at:
+            Stop counting if repository has at least stop_at commits.
+            This safes at most two requests. Negative values mean that the
+            total amount is returned. Default: -1.
         :returns int:
-            Number of commits in main branch of this repository.
+            Number of commits N in main branch of this repository, if
+            stop_at < 0 OR N <= stop_at.  Otherwise X with
+            0 < stop_at <= X <= N.
         """
+        if stop_at == 0:
+            return 0
         page_iterator = self.iter_commits(self.default_branch)
         # Perform actual HTTP request for first page
         try:
@@ -141,15 +161,15 @@ class Repo(Repository):
         last_link = page_iterator.last_response.links.get('last', {})
         last_rel = last_link.get('url', '')
         num_pages = self._parse_num_pages(last_rel)
+        count_per_page = page_iterator.params['per_page']
 
-        if num_pages == 1:
+        if num_pages == 1 or 0 < stop_at <= count_per_page:
             last_page = page_iterator.last_response
         else:
             # Use get method of iterator to read rate limit in response headers
             last_page = page_iterator._get(
                     last_rel, headers=page_iterator.headers)
 
-        count_per_page = page_iterator.params['per_page']
         count_last_page = len(page_iterator._get_json(last_page))
 
         return count_per_page * (num_pages - 1) + count_last_page

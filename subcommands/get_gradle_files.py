@@ -15,13 +15,12 @@ from github3.models import GitHubError
 from github3.repos.contents import Contents
 from github3.search import CodeSearchResult
 from util.github_repo import RepoVerifier
-from util.ratelimited_github import RateLimitedGitHub
 
 
 __log__ = logging.getLogger(__name__)
 
 
-class GradleFileSearcher(RateLimitedGitHub):
+class GradleFileSearcher(RepoVerifier):
     """Wrapper for Github API to download gradle files."""
 
     def search_gradle_files(self, repo: str) -> Iterator[CodeSearchResult]:
@@ -146,6 +145,11 @@ def _main(args: argparse.Namespace):
     :param argparse.Namespace args:
         Command line arguments.
     """
+    def _download_gradle_files(repo_name: str) -> bool:
+        """Closure for download_gradle_files."""
+        __log__.info('Get gradle files in %s', repo_name)
+        return download_gradle_files(repo_name, github, args.outdir)
+
     __log__.debug('Reading from %s', args.repo_list.name)
     github = GradleFileSearcher(token=os.getenv('GITHUB_AUTH_TOKEN'))
     csv_reader = csv.DictReader(args.repo_list)
@@ -160,29 +164,12 @@ def _main(args: argparse.Namespace):
             'renamed_to': '',
             'not_found': False,
             })
-        while repo_name:
-            try:
-                __log__.info('Get gradle files in %s', repo_name)
-                row['has_gradle_files'] = download_gradle_files(
-                    repo_name, github, args.outdir)
-                break
-            except GitHubError as error:
-                if error.code == 422:  # Validation Failed
-                    # Likely a repo name that does not exist anymore
-                    parts = RepoVerifier.full_name_to_parts(repo_name)
-                    repo = github.repository(*parts)
-                    if not repo:
-                        __log__.info('Repo does not exist: %s', repo_name)
-                        row['not_found'] = True
-                        break
-                    elif repo.full_name is not repo_name:
-                        __log__.info(
-                            'Repo was moved: %s -> %s', repo_name,
-                            repo.full_name)
-                        symlink_repo(args.outdir, repo_name, repo.full_name)
-                        repo_name = repo.full_name  # Try with new name
-                        row['renamed_to'] = repo_name
-                    else:
-                        __log__.exception(error)
-                        raise error
+        new_name, has_gradle_files = github.catch_renamed_repo(repo_name)
+        if new_name:
+            row['has_gradle_files'] = has_gradle_files
+            if new_name != repo_name:
+                row['renamed_to'] = new_name
+                symlink_repo(args.outdir, repo_name, new_name)
+        else:
+            row['not_found'] = True
         csv_writer.writerow(row)

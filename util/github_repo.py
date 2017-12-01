@@ -43,13 +43,17 @@ Example:
     }
 """
 
+import logging
 import re
 from github3.repos.repo import Repository
 from github3.models import GitHubError
-from typing import Tuple
+from typing import Any, Callable, Tuple
 from urllib.parse import urlparse, parse_qs
 from .parse import ParsedJSON
 from .ratelimited_github import RateLimitedGitHub
+
+
+__log__ = logging.getLogger(__name__)
 
 
 class Repo(Repository):
@@ -209,6 +213,52 @@ class RepoVerifier(RateLimitedGitHub):
         raise ValueError(
                 '{} is not a valid name of a Github repository'.format(
                     full_name))
+
+    def catch_renamed_repo(
+            self, repo_name: str,
+            try_fn: Callable[[str], Any]) -> Tuple[str, Any]:
+        """Execute try_fn dynamically handling renamed repositories.
+
+        When using Github's search API, unknown repository names result in
+        HTTP status 422. This happens also for renamed repositories. This
+        method tries executing try_fn(repo_name). If status 422 is
+        encountered, the new name of the repository is requested from Github.
+        In case a new name is found, try_fn(new_name) is tried again.
+
+        In case Github does not return a repository for the name, (None, None)
+        is returned.
+
+        Other exceptions are passed through.
+
+        :param str repo_name:
+            Known name of repository.
+        :param Callable[[str], Any] try_fn:
+            Function to execute for repository name. Takes name of repository
+            as argument.
+        :returns Tuple:
+            a tuple of the canonical repository name and whatever try_fn
+            returns if a repository is found. Otherwise (None, None).
+        """
+        while repo_name:
+            try:
+                result = try_fn(repo_name)
+                return repo_name, result
+            except GitHubError as error:
+                if error.code == 422:  # Validation Failed
+                    # Likely a repo name that does not exist anymore
+                    parts = RepoVerifier.full_name_to_parts(repo_name)
+                    repo = self.repository(*parts)
+                    if not repo:
+                        __log__.info('Repo does not exist: %s', repo_name)
+                        return None, None
+                    elif repo.full_name is not repo_name:
+                        __log__.info(
+                            'Repo was moved: %s -> %s', repo_name,
+                            repo.full_name)
+                        repo_name = repo.full_name  # Try with new name
+                    else:
+                        __log__.exception(error)
+                        raise error
 
 
 if __name__ == '__main__':

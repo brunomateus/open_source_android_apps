@@ -14,7 +14,6 @@ import logging
 import os
 import random
 import sys
-import textwrap
 from typing import IO, Iterator, Set, Tuple
 from github3.repos.repo import Repository
 from github3.repos.commit import RepoCommit
@@ -25,10 +24,7 @@ __log__ = logging.getLogger(__name__)
 
 
 MANIFEST_SEARCH = 'repo:{} filename:AndroidManifest.xml package="{}"'
-COMMIT_INFO = 'Repository: {}\nCommit: {}\n\n{}'
-COMMIT_MSG_INDENT = ' ' * 4
-# Line of hash characters surrounded by newlines.
-COMMIT_DIVIDER = '\n\n' + '#' * 80 + '\n\n'
+OUTPUT_FIELDNAMES = ['Repository', 'Commit', 'Message']
 
 
 def define_cmdline_arguments(parser: argparse.ArgumentParser):
@@ -48,7 +44,7 @@ def define_cmdline_arguments(parser: argparse.ArgumentParser):
         help='Number of commits to draw in total. Default: 5000.')
     parser.add_argument(
         '-o', '--outfile', default=sys.stdout, type=argparse.FileType('w'),
-        help='Path to store output files at. Default: stdout')
+        help='Path to store output file at. Default: stdout')
     parser.set_defaults(func=_main)
 
 
@@ -129,9 +125,11 @@ def format_commit_info(item: Tuple[Repository, RepoCommit]) -> str:
         Repository name, commit hash, and commit message.
     """
     repo, commit = item
-    message = textwrap.indent(commit.commit.message, COMMIT_MSG_INDENT)
-    info = COMMIT_INFO.format(repo.full_name, commit.sha, message)
-    return info
+    return {
+        'Repository': repo.full_name,
+        'Commit': commit.sha,
+        'Message': commit.commit.message
+        }
 
 
 def print_commit_sample(
@@ -157,14 +155,14 @@ def print_commit_sample(
     :param RepoVerifier github:
         Instance to access Github API v3.
     """
+    csv_writer = csv.DictWriter(outfile, fieldnames=OUTPUT_FIELDNAMES)
     commits = collect_commits(package_list, min_commits, github)
     if len(commits) > sample_size:
         sample = random.sample(commits, sample_size)
     else:
         sample = commits
-    commit_descriptions = map(format_commit_info, sample)
-    output = COMMIT_DIVIDER.join(sorted(commit_descriptions))
-    print(output, file=outfile)
+    csv_writer.writeheader()
+    csv_writer.writerows(sorted(map(format_commit_info, sample)))
 
 
 def _main(args: argparse.Namespace):

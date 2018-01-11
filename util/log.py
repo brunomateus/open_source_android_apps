@@ -3,6 +3,7 @@ import logging
 from typing import IO, Text
 import github3
 import urllib3
+import neo4j
 
 
 LOG_LEVEL = logging.WARNING
@@ -33,10 +34,10 @@ def compute_level(verbose: int, quiet: int) -> int:
 
 def lower_level_for_libraries(min_level: int):
     """Decrease log level for libraries."""
-    min_level = min(min_level, logging.WARNING)
-    for package in [github3, urllib3]:
+    max_level = max(min_level, logging.WARNING)
+    for package in [github3, urllib3, neo4j]:
         logger = logging.getLogger(package.__package__)
-        logger.setLevel(logging.WARNING)
+        logger.setLevel(max_level)
 
 
 def configure_logger(name: Text, stream: IO[str], verbose: int, quiet: int):

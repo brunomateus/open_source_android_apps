@@ -65,3 +65,19 @@ def invert_mapping(packages: Mapping[str, Sequence[str]]) -> Dict[
         for repo in repos:
             result.setdefault(repo, set()).add(package)
     return result
+
+
+def parse_repo_to_package_file(input_file: IO[str]) -> Dict[str, Set[str]]:
+    """Parse CSV file mapping a repository name to a package name.
+
+    :param IO[str] input_file:
+        CSV file to parse. First column of the file needs to contain package
+        names. The second column contains the corresponding repository name.
+    :returns Dict[str, Set[str]]:
+        A mapping from repository name to set of package names in that
+        repository.
+    """
+    result = {}
+    for row in csv.reader(input_file):
+        result.setdefault(row[1], set()).add(row[0])
+    return result

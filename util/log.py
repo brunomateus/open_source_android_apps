@@ -62,3 +62,5 @@ def configure_logger(name: Text, stream: IO[str], verbose: int, quiet: int):
     logger = logging.getLogger(name)
     logger.setLevel(handler.level)
     logger.addHandler(handler)
+
+    logger.info('Log to %s. Level: %d', stream.name, log_level)

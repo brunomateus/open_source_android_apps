@@ -70,7 +70,15 @@ def format_google_play_info(json_file: IO[str]) -> dict:
         Properties of a node represinting the Google Play page of an app.
     """
     meta_data = json.load(json_file)
-    offer = meta_data.get('offer', {})
+    if not meta_data:
+        return None
+    offer = meta_data.get('offer', [])
+    if offer:
+        formatted_amount = offer[0].get('formattedAmount')
+        currency_code = offer[0].get('currencyCode')
+    else:
+        formatted_amount = None
+        currency_code = None
     details = meta_data.get('details', {})
     app_details = details.get('appDetails', {})
 
@@ -86,8 +94,8 @@ def format_google_play_info(json_file: IO[str]) -> dict:
         'versionCode': app_details.get('versionCode'),
         'versionString': app_details.get('versionString'),
         'uploadDate': parse_upload_date(app_details),
-        'formattedAmount': offer.get('formattedAmount'),
-        'currencyCode': offer.get('currencyCode'),
+        'formattedAmount': formatted_amount,
+        'currencyCode': currency_code,
         'in-app purchases': describe_in_app_purchases(meta_data),
         'installNotes': app_details.get('installNotes'),
         'starRating': meta_data.get('aggregateRating', {}).get('starRating'),

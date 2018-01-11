@@ -81,6 +81,9 @@ def format_google_play_info(json_file: IO[str]) -> dict:
         currency_code = None
     details = meta_data.get('details', {})
     app_details = details.get('appDetails', {})
+    aggregate_rating = meta_data.get('aggregateRating')
+    if not aggregate_rating:
+        aggregate_rating = {}
 
     return {
         'docId': meta_data.get('docId'),
@@ -98,7 +101,7 @@ def format_google_play_info(json_file: IO[str]) -> dict:
         'currencyCode': currency_code,
         'in-app purchases': describe_in_app_purchases(meta_data),
         'installNotes': app_details.get('installNotes'),
-        'starRating': meta_data.get('aggregateRating', {}).get('starRating'),
+        'starRating': aggregate_rating.get('starRating'),
         'numDownloads': app_details.get('numDownloads'),
         'developerName': app_details.get('developerName'),
         'developerEmail': app_details.get('developerEmail'),

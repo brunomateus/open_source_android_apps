@@ -88,7 +88,7 @@ def format_google_play_info(json_file: IO[str]) -> dict:
     return {
         'docId': meta_data.get('docId'),
         'uri': meta_data.get('shareUrl'),
-        'snapshotTimestamp': os.stat(json_file).st_mtime,
+        'snapshotTimestamp': os.stat(json_file.name).st_mtime,
         'title': meta_data.get('title'),
         'appCategory': app_details.get('appCategory'),
         'promotionalDescription': meta_data['promotionalDescription'],

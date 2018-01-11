@@ -136,9 +136,11 @@ def add_google_play_page_node(
             'Cannot create GooglePlayPage node: %s does not exist.',
             json_file_path)
         return None
+    __log__.info('Create GooglePlayPage node from %s', json_file_path)
     with open(json_file_path, 'r') as json_file:
         google_play_info = format_google_play_info(json_file)
-    __log__.info('Create GooglePlayPage node from %s', json_file_path)
+        if not google_play_info:
+            return None
     return neo4j.create_node('GooglePlayPage', **google_play_info)
 
 

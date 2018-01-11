@@ -525,7 +525,8 @@ def add_implementation_properties(
         Neo4j instance to add nodes to.
     """
     repository_path = os.path.join(
-        GITLAB_REPOSITORY_PATH, meta_data['clone_project_name'])
+        GITLAB_REPOSITORY_PATH,
+        '{}.git'.format(meta_data['clone_project_name']))
     __log__.info('Use local git repository at %s', repository_path)
     git = BareGit(repository_path)
     for package in packages:

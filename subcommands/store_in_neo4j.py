@@ -199,11 +199,11 @@ def add_repository_node(
         CREATE
             (app)
             -[:IMPLEMENTED_BY]->
-            (repo:GitHubRepository {repo_properties}
+            (repo:GitHubRepository {repo_properties})
         RETURN repo
         '''
     result = neo4j.run(
-        query, package_name=package_names, repo_properties=repo_data)
+        query, package_names=list(package_names), repo_properties=repo_data)
     return result.single()[0]
 
 
@@ -261,7 +261,7 @@ def add_tag_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
     """
     for tag in gitlab_project.tags.list(all=True, as_list=False):
         parameters = {
-            'commit_hash': tag.commit.id,
+            'commit_hash': tag.commit['id'],
             'repo_id': repo_node_id,
             'tag_details': {
                 'name': tag.name,
@@ -271,11 +271,11 @@ def add_tag_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
 
         neo4j.run(
             '''
-            MERGE (commit:Commit {hash: {commit_hash}
-            MATCH (repo:GitHubRepository)
-            WHERE id(repo) = {repo_id}
+            MATCH (repo:GitHubRepository) WHERE id(repo) = {repo_id}
+            MERGE (commit:Commit {id: {commit_hash}})
             CREATE
-                (:Tag {tag_details})-[:BELONGS_TO]->(repo),
+                (tag:Tag {tag_details})-[:BELONGS_TO]->(repo),
+                (tag)-[:POINTS_TO]->(commit)
             ''', **parameters)
 
 
@@ -295,7 +295,7 @@ def add_branche_nodes(
     """
     for branch in gitlab_project.branches.list(all=True, as_list=False):
         parameters = {
-            'commit_hash': branch.commit.id,
+            'commit_hash': branch.commit['id'],
             'repo_id': repo_node_id,
             'branch_details': {
                 'name': branch.name,
@@ -304,11 +304,11 @@ def add_branche_nodes(
 
         neo4j.run(
             '''
-            MERGE (commit:Commit {hash: {commit_hash}
-            MATCH (repo:GitHubRepository)
-            WHERE id(repo) = {repo_id}
+            MATCH (repo:GitHubRepository) WHERE id(repo) = {repo_id}
+            MERGE (commit:Commit {id: {commit_hash}})
             CREATE
-                (:Branch {branch_details})-[:BELONGS_TO]->(repo),
+                (branch:Branch {branch_details})-[:BELONGS_TO]->(repo),
+                (branch)-[:POINTS_TO]->(commit)
             ''', **parameters)
 
 
@@ -330,21 +330,18 @@ def add_commit_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
     """
     for commit in gitlab_project.commits.list(all=True, as_list=False):
         parameters = {
-            'commit_hash': commit.id,
-            'author_email': commit.author_email,
-            'committer_email': commit.committer_email,
             'repo_id': repo_node_id,
-            'commit_details': {
+            'commit': {
                 'id': commit.id,
                 'short_id': commit.short_id,
                 'title': commit.title,
                 'message': commit.message,
                 },
-            'author_details': {
+            'author': {
                 'email': commit.author_email,
                 'name': commit.author_name,
                 },
-            'committer_details': {
+            'committer': {
                 'email': commit.committer_email,
                 'name': commit.committer_name,
                 },
@@ -354,22 +351,29 @@ def add_commit_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
 
         neo4j.run(
             '''
-            MERGE (commit:Commit {hash: {commit_hash}
-            MERGE (author:Contributor {email: {author_email}})
-            MERGE (committer:Contributor {email: {committer_email}})
-            MATCH (repo:GitHubRepository)
-            WHERE id(repo) = {repo_id}
+            MATCH (repo:GitHubRepository) WHERE id(repo) = {repo_id}
+            MERGE (commit:Commit {id: {commit}.id})
+                ON CREATE SET commit = {commit}
+                ON MATCH SET commit += {commit}
+            MERGE (author:Contributor {email: {author}.email})
+                ON CREATE SET author = {author}
+                ON MATCH SET author += {author}
+            MERGE (committer:Contributor {email: {committer}.email})
+                ON CREATE SET committer = {committer}
+                ON MATCH SET committer += {committer}
             CREATE
-                (commit {commit_details}),
-                (author {author_details}),
-                (committer {committer_details}),
                 (commit)-[:BELONGS_TO]->(repo),
                 (author)-[:AUTHORS {date: {authored_date}}]->(commit),
                 (committer)-[:COMMITS {date: {committed_date}}]->(commit)
             ''', **parameters)
 
         for parent in commit.parent_ids:
-            neo4j.run('MERGE (:Commit {hash: {parent}})', parent=parent)
+            neo4j.run(
+                '''
+                MATCH (c:Commit {id: {child}})
+                MERGE (p:Commit {id: {parent}})
+                CREATE (c)-[:PARENT]->(p)
+                ''', parent=parent, child=commit.id)
 
 
 def add_paths_property(
@@ -399,7 +403,7 @@ def add_paths_property(
         MATCH
             (:App {id: {package}})-[r:IMPLEMENTED_BY]->(repo:GitHubRepository)
         WHERE id(repo) = {repo_id}
-        CREATE (r {rel_properties})
+        SET r += {rel_properties}
         '''
     neo4j.run(query, **parameters)
 

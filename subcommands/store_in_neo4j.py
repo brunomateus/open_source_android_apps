@@ -144,21 +144,22 @@ def add_google_play_page_node(
     return neo4j.create_node('GooglePlayPage', **google_play_info)
 
 
-def format_repository_data(meta_data: dict, snapshot: str) -> dict:
+def format_repository_data(meta_data: dict, snapshot: Project) -> dict:
     """Format repository data for insertion into Neo4j.
 
     :param dict meta_data:
         Meta data of Google Play Store page parses from JSON.
-    :param str snapshot:
-        String representation of snapshot time of repository mirror.
+    :param gitlab.v4.object.Project snapshot:
+        Gitlab project of repository mirror.
     :returns dict:
         A dictionary of properties of the node to create.
     """
-    snapshot_time = datetime.strptime(snapshot, '%Y-%m-%dT%H:%M:%S.%fZ')
+    snapshot_time = datetime.strptime(
+        snapshot.created_at, '%Y-%m-%dT%H:%M:%S.%fZ')
     return {
         'owner': meta_data['owner_login'],
         'name': meta_data['renamed_to'] or meta_data['name'],
-        'snapshot': meta_data['clone_project_url'],
+        'snapshot': snapshot.web_url,
         'snapshotTimestamp': snapshot_time.timestamp(),
         'description': meta_data['description'],
         'createdAt': meta_data['created_at'],
@@ -175,7 +176,7 @@ def format_repository_data(meta_data: dict, snapshot: str) -> dict:
 
 def add_repository_node(
         meta_data: dict, package_names: Set[str],
-        snapshot: str, neo4j: Neo4j) -> Node:
+        snapshot: Project, neo4j: Neo4j) -> Node:
     """Add a repository and link it to all apps imnplemented by it.
 
     Does not do anything if packages_names is empty or no :App node exists
@@ -185,8 +186,8 @@ def add_repository_node(
         Meta data of Google Play Store page parses from JSON.
     :param Set[str] package_names:
         a set of package names implemented by this repository.
-    :param str snapshot:
-        String representation of snapshot time of repository mirror.
+    :param gitlab.v4.object.Project snapshot:
+        Gitlab project of repository mirror.
     :param Neo4j neo4j:
         Neo4j instance to add nodes to.
     :returns Node:
@@ -504,8 +505,7 @@ def add_maven_config_path(
 
 
 def add_implementation_properties(
-        project: Project, repo_node_id: int, meta_data: dict, packages: dict,
-        neo4j: Neo4j):
+        project: Project, repo_node_id: int, packages: dict, neo4j: Neo4j):
     """Add properties to IMPLEMENTED_BY relationship.
 
     Find Android manifest files and build system files for app in the
@@ -516,8 +516,6 @@ def add_implementation_properties(
         Gitlab project to search.
     :param int repo_node_id:
         ID of node representing the repository.
-    :param dict meta_data:
-        Dictionary containing repository meta data.
     :param Dict[str, Set[str]] packages:
         A mapping from repository name to set of package names in that
         repository.
@@ -525,8 +523,7 @@ def add_implementation_properties(
         Neo4j instance to add nodes to.
     """
     repository_path = os.path.join(
-        GITLAB_REPOSITORY_PATH,
-        '{}.git'.format(meta_data['clone_project_name']))
+        GITLAB_REPOSITORY_PATH, '{}.git'.format(project.path))
     __log__.info('Use local git repository at %s', repository_path)
     git = BareGit(repository_path)
     for package in packages:
@@ -564,7 +561,7 @@ def add_repository_info(
         packages = find_package_names(row, packages_by_repo)
         __log__.info('Found packages: %s', packages)
         project = gitlab.projects.get(int(row['clone_project_id']))
-        node = add_repository_node(row, packages, project.created_at, neo4j)
+        node = add_repository_node(row, packages, project, neo4j)
         __log__.info('Created :GitHubRepository node with id %d', node.id)
         add_commit_nodes(project, node.id, neo4j)
         __log__.info('Created :Commit nodes')
@@ -572,7 +569,7 @@ def add_repository_info(
         __log__.info('Created :Branch nodes')
         add_tag_nodes(project, node.id, neo4j)
         __log__.info('Created :Tag nodes')
-        add_implementation_properties(project, node.id, row, packages, neo4j)
+        add_implementation_properties(project, node.id, packages, neo4j)
 
 
 def add_app_data(packages_by_repo: dict, play_details_dir: str, neo4j: Neo4j):

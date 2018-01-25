@@ -61,15 +61,32 @@ def parse_upload_date(app_details: ParsedJSON) -> float:
     return None
 
 
-def format_google_play_info(json_file: IO[str]) -> dict:
+def parse_google_play_info(package_name: str, play_details_dir: str) -> dict:
     """Select and format data from json_file to store in node.
 
-    :param IO[str] json_file:
-        JSON file to read meta data from.
+    :param str package_name:
+        Package name.
+    :param str play_details_dir:
+        Name of directory to include JSON files from. Filenames in this
+        directory need to have .json extension. Filename without extension is
+        assumed to be package name for details contained in file.
     :returns dict:
         Properties of a node represinting the Google Play page of an app.
     """
-    meta_data = json.load(json_file)
+    def _parse_json_file(prefix: str) -> Tuple[dict, float]:
+        """Return parsed JSON and mdate
+
+        Uses prefix and package_name (from outer scope) to build path.
+        """
+        json_file_name = '{}.json'.format(package_name)
+        json_file_path = os.path.join(prefix, json_file_name)
+        if not os.path.exists(json_file_path):
+            __log__.warning('Cannot read file: %s.', json_file_path)
+            return {}, None
+        with open(json_file_path) as json_file:
+            return json.load(json_file), os.stat(json_file_path).st_mtime
+
+    meta_data, mtime = _parse_json_file(play_details_dir)
     if not meta_data:
         return None
     offer = meta_data.get('offer', [])
@@ -88,7 +105,7 @@ def format_google_play_info(json_file: IO[str]) -> dict:
     return {
         'docId': meta_data.get('docId'),
         'uri': meta_data.get('shareUrl'),
-        'snapshotTimestamp': os.stat(json_file.name).st_mtime,
+        'snapshotTimestamp': mtime,
         'title': meta_data.get('title'),
         'appCategory': app_details.get('appCategory'),
         'promotionalDescription': meta_data['promotionalDescription'],
@@ -129,18 +146,11 @@ def add_google_play_page_node(
     :return Node:
         Node created for Google Play page if JSON file exists, otherwise None.
     """
-    json_file_name = '{}.json'.format(package_name)
-    json_file_path = os.path.join(play_details_dir, json_file_name)
-    if not os.path.exists(json_file_path):
-        __log__.warning(
-            'Cannot create GooglePlayPage node: %s does not exist.',
-            json_file_path)
+    google_play_info = parse_google_play_info(package_name, play_details_dir)
+    if not google_play_info:
+        __log__.warning('Cannot create GooglePlayPage node %s.', package_name)
         return None
-    __log__.info('Create GooglePlayPage node from %s', json_file_path)
-    with open(json_file_path, 'r') as json_file:
-        google_play_info = format_google_play_info(json_file)
-        if not google_play_info:
-            return None
+    __log__.info('Create GooglePlayPage node for %s.', package_name)
     return neo4j.create_node('GooglePlayPage', **google_play_info)
 
 

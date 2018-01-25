@@ -87,8 +87,13 @@ def parse_google_play_info(package_name: str, play_details_dir: str) -> dict:
             return json.load(json_file), os.stat(json_file_path).st_mtime
 
     meta_data, mtime = _parse_json_file(play_details_dir)
-    if not meta_data:
+    category_data, category_mtime = _parse_json_file(os.path.join(
+        play_details_dir, 'categories'))
+    if not meta_data and not category_data:
         return None
+    if not meta_data:
+        meta_data = {'docId': package_name}
+        mtime = category_mtime
     offer = meta_data.get('offer', [])
     if offer:
         formatted_amount = offer[0].get('formattedAmount')
@@ -98,6 +103,9 @@ def parse_google_play_info(package_name: str, play_details_dir: str) -> dict:
         currency_code = None
     details = meta_data.get('details', {})
     app_details = details.get('appDetails', {})
+    if category_data:
+        categories = app_details.setdefault('appCategory', [])
+        categories.append(category_data['appCategory'])
     aggregate_rating = meta_data.get('aggregateRating')
     if not aggregate_rating:
         aggregate_rating = {}

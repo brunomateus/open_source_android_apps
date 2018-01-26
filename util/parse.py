@@ -4,14 +4,22 @@ import csv
 import glob
 import json
 import os
-from typing import Union
-from typing import Dict, Generator, List, Mapping, Sequence, Set, Text, Tuple
-from typing.io import IO
+from typing import \
+    Dict, \
+    Generator, \
+    IO, \
+    List, \
+    Mapping, \
+    Sequence, \
+    Set, \
+    Text, \
+    Tuple, \
+    Union
 
 
-ParsedJSON = Union[
-        Mapping[Text, 'ParsedJSON'], Sequence['ParsedJSON'], Text, int, float,
-        bool, None]
+ParsedJSON = Union[  # pylint: disable=C0103
+    Mapping[Text, 'ParsedJSON'], Sequence['ParsedJSON'], Text, int, float,
+    bool, None]
 
 
 def parse_package_to_repos_file(input_file: IO[str]) -> Dict[str, List[str]]:

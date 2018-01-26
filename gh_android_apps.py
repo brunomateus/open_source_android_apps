@@ -25,6 +25,7 @@ SUB_COMMANDS = [
     'add_gradle_info',
     'clone',
     'draw_commits',
+    'mirror_empty_repos',
     'consolidate_data',
     'store_repo_data',
     'store_in_neo4j',

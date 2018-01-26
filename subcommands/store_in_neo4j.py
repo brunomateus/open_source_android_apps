@@ -6,18 +6,19 @@ import argparse
 import csv
 from datetime import datetime
 import itertools
-import json
 import logging
 import os
-from typing import IO, Set, Tuple
+from typing import IO, Set
 
 from gitlab import Gitlab
 from gitlab.v4.objects import Project
 
 from util.bare_git import BareGit
 from util.neo4j import Neo4j, Node
-from util.parse import ParsedJSON
-from util.parse import parse_repo_to_package_file
+from util.parse import \
+    parse_repo_to_package_file, \
+    get_latest_repo_name, \
+    parse_google_play_info
 
 
 __log__ = logging.getLogger(__name__)
@@ -27,113 +28,6 @@ NEO4J_HOST = 'bolt://localhost'
 NEO4J_PORT = 7687
 GITLAB_HOST = 'http://145.108.225.21'
 GITLAB_REPOSITORY_PATH = '/var/opt/gitlab/git-data/repositories/gitlab'
-
-
-def describe_in_app_purchases(meta_data: ParsedJSON) -> str:
-    """Find description of in-app purchases.
-
-    :param dict meta_data:
-        Meta data of Google Play Store page parses from JSON.
-    :returns str:
-        Description of in-app purchases if it exists, otherwise None.
-    """
-    product_details_sections = meta_data.get('productDetails', {}).get(
-        'section', [])
-    for section in product_details_sections:
-        if section['title'] == 'In-app purchases':
-            return section['description'][0]['description']
-    return None
-
-
-def parse_upload_date(app_details: ParsedJSON) -> float:
-    """Parse upload date to POSIX timestamp
-
-    :param dict app_details:
-        App details section of meta data of Google Play Store page parses
-        from JSON.
-    :returns float:
-        POSIX timestampt of upload date.
-    """
-    upload_date_string = app_details.get('uploadDate')
-    if upload_date_string:
-        return datetime.strptime(
-            upload_date_string, '%b %d, %Y').timestamp()
-    return None
-
-
-def parse_google_play_info(package_name: str, play_details_dir: str) -> dict:
-    """Select and format data from json_file to store in node.
-
-    :param str package_name:
-        Package name.
-    :param str play_details_dir:
-        Name of directory to include JSON files from. Filenames in this
-        directory need to have .json extension. Filename without extension is
-        assumed to be package name for details contained in file.
-    :returns dict:
-        Properties of a node represinting the Google Play page of an app.
-    """
-    def _parse_json_file(prefix: str) -> Tuple[dict, float]:
-        """Return parsed JSON and mdate
-
-        Uses prefix and package_name (from outer scope) to build path.
-        """
-        json_file_name = '{}.json'.format(package_name)
-        json_file_path = os.path.join(prefix, json_file_name)
-        if not os.path.exists(json_file_path):
-            __log__.warning('Cannot read file: %s.', json_file_path)
-            return {}, None
-        with open(json_file_path) as json_file:
-            return json.load(json_file), os.stat(json_file_path).st_mtime
-
-    meta_data, mtime = _parse_json_file(play_details_dir)
-    category_data, category_mtime = _parse_json_file(os.path.join(
-        play_details_dir, 'categories'))
-    if not meta_data and not category_data:
-        return None
-    if not meta_data:
-        meta_data = {'docId': package_name}
-        mtime = category_mtime
-    offer = meta_data.get('offer', [])
-    if offer:
-        formatted_amount = offer[0].get('formattedAmount')
-        currency_code = offer[0].get('currencyCode')
-    else:
-        formatted_amount = None
-        currency_code = None
-    details = meta_data.get('details', {})
-    app_details = details.get('appDetails', {})
-    if category_data:
-        categories = app_details.setdefault('appCategory', [])
-        categories.append(category_data['appCategory'])
-    aggregate_rating = meta_data.get('aggregateRating')
-    if not aggregate_rating:
-        aggregate_rating = {}
-
-    return {
-        'docId': meta_data.get('docId'),
-        'uri': meta_data.get('shareUrl'),
-        'snapshotTimestamp': mtime,
-        'title': meta_data.get('title'),
-        'appCategory': app_details.get('appCategory'),
-        'promotionalDescription': meta_data['promotionalDescription'],
-        'descriptionHtml': meta_data['descriptionHtml'],
-        'translatedDescriptionHtml': meta_data['translatedDescriptionHtml'],
-        'versionCode': app_details.get('versionCode'),
-        'versionString': app_details.get('versionString'),
-        'uploadDate': parse_upload_date(app_details),
-        'formattedAmount': formatted_amount,
-        'currencyCode': currency_code,
-        'in-app purchases': describe_in_app_purchases(meta_data),
-        'installNotes': app_details.get('installNotes'),
-        'starRating': aggregate_rating.get('starRating'),
-        'numDownloads': app_details.get('numDownloads'),
-        'developerName': app_details.get('developerName'),
-        'developerEmail': app_details.get('developerEmail'),
-        'developerWebsite': app_details.get('developerWebsite'),
-        'targetSdkVersion': app_details.get('targetSdkVersion'),
-        'permissions':  app_details.get('permission')
-        }
 
 
 def add_google_play_page_node(
@@ -224,26 +118,6 @@ def add_repository_node(
     result = neo4j.run(
         query, package_names=list(package_names), repo_properties=repo_data)
     return result.single()[0]
-
-
-def get_latest_repo_name(meta_data: dict) -> Tuple[str, str]:
-    """Determine the most recently used repository name.
-
-    :param dict meta_data:
-        Dictionary containing repository meta data. Needs to include
-        `full_name`, `renamed_to` and `not_found`.
-    :returns Tuple[str, str]:
-        Tuple of original repository name and latest known repository
-        name if available, otherwise None.
-    """
-    original_repo = meta_data['full_name']
-    renamed_to = meta_data['renamed_to']
-    not_found = meta_data['not_found'] == 'TRUE'
-    if renamed_to:
-        return original_repo, renamed_to
-    elif not not_found:
-        return original_repo, original_repo
-    return original_repo, None
 
 
 def find_package_names(meta_data: dict, packages: dict) -> Set[str]:

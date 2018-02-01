@@ -4,7 +4,6 @@ Use -h or --help for more information.
 """
 import argparse
 import csv
-from datetime import datetime
 import itertools
 import logging
 import os
@@ -18,7 +17,8 @@ from util.neo4j import Neo4j, Node
 from util.parse import \
     parse_repo_to_package_file, \
     get_latest_repo_name, \
-    parse_google_play_info
+    parse_google_play_info, \
+    parse_iso8601
 
 
 __log__ = logging.getLogger(__name__)
@@ -66,13 +66,11 @@ def format_repository_data(meta_data: dict, snapshot: Project) -> dict:
     :returns dict:
         A dictionary of properties of the node to create.
     """
-    snapshot_time = datetime.strptime(
-        snapshot.created_at, '%Y-%m-%dT%H:%M:%S.%fZ')
     return {
         'owner': meta_data['owner_login'],
         'name': meta_data['renamed_to'] or meta_data['name'],
         'snapshot': snapshot.web_url,
-        'snapshotTimestamp': snapshot_time.timestamp(),
+        'snapshotTimestamp': parse_iso8601(snapshot.created_at),
         'description': meta_data['description'],
         'createdAt': meta_data['created_at'],
         'forksCount': meta_data['forks_count'],
@@ -238,8 +236,8 @@ def add_commit_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
                 'email': commit.committer_email,
                 'name': commit.committer_name,
                 },
-            'authored_date': commit.authored_date,
-            'committed_date': commit.committed_date,
+            'authored_date': parse_iso8601(commit.authored_date),
+            'committed_date': parse_iso8601(commit.committed_date),
             }
 
         neo4j.run(
@@ -256,8 +254,8 @@ def add_commit_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
                 ON MATCH SET committer += {committer}
             CREATE
                 (commit)-[:BELONGS_TO]->(repo),
-                (author)-[:AUTHORS {date: {authored_date}}]->(commit),
-                (committer)-[:COMMITS {date: {committed_date}}]->(commit)
+                (author)-[:AUTHORS {timestamp: {authored_date}}]->(commit),
+                (committer)-[:COMMITS {timestamp: {committed_date}}]->(commit)
             ''', **parameters)
 
         for parent in commit.parent_ids:

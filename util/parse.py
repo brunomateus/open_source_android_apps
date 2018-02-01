@@ -6,6 +6,7 @@ import glob
 import json
 import logging
 import os
+import re
 from typing import \
     Dict, \
     Generator, \
@@ -24,6 +25,10 @@ __log__ = logging.getLogger(__name__)
 ParsedJSON = Union[  # pylint: disable=C0103
     Mapping[Text, 'ParsedJSON'], Sequence['ParsedJSON'], Text, int, float,
     bool, None]
+
+TIME_FORMAT = '%Y-%m-%dT%H:%M:%S%z'
+TIMESTAMP_PATTERN = re.compile(
+    r'(\d+-\d+-\d+T\d+:\d+:\d+)\.?\d*([-\+Z])((\d+):(\d+))?')
 
 
 def parse_package_to_repos_file(input_file: IO[str]) -> Dict[str, List[str]]:
@@ -122,8 +127,8 @@ def parse_upload_date(app_details: ParsedJSON) -> float:
     """
     upload_date_string = app_details.get('uploadDate')
     if upload_date_string:
-        return datetime.strptime(
-            upload_date_string, '%b %d, %Y').timestamp()
+        return int(datetime.strptime(
+            upload_date_string, '%b %d, %Y').timestamp())
     return None
 
 
@@ -150,7 +155,7 @@ def parse_google_play_info(package_name: str, play_details_dir: str) -> dict:
             __log__.warning('Cannot read file: %s.', json_file_path)
             return {}, None
         with open(json_file_path) as json_file:
-            return json.load(json_file), os.stat(json_file_path).st_mtime
+            return json.load(json_file), int(os.stat(json_file_path).st_mtime)
 
     meta_data, mtime = _parse_json_file(play_details_dir)
     category_data, category_mtime = _parse_json_file(os.path.join(
@@ -220,6 +225,52 @@ def get_latest_repo_name(meta_data: dict) -> Tuple[str, str]:
     elif not not_found:
         return original_repo, original_repo
     return original_repo, None
+
+
+def parse_iso8601(timestamp: str) -> int:
+    """Parse an ISO 8601 timestamp.
+
+    Discards fractions of seconds if they are present.
+
+    built-in datetime.strptime has no way of correctly parsing ISO 8601
+    timestamps with timezone information.
+
+    Example:
+    >>> parse_iso8601('2015-03-27T19:25:23.000-08:00')
+    1427513123
+    >>> parse_iso8601('2014-02-27T15:05:06+01:00')
+    1393509906
+    >>> parse_iso8601('2008-09-03T20:56:35.450686Z')
+    1220475395
+
+    :param str timestamp:
+        ISO 8601 formatted timestamp with timezone offset. Can but need not
+        include milliseconds which get discared if present.
+    :returns int:
+        POSIX timestamp. Seconds since the epoch.
+    :raises ValueError:
+        if timestamp is malformed.
+    """
+    def _raise():
+        raise ValueError(
+            'Cannot parse malformed timestamp: {}'.format(timestamp))
+
+    match = TIMESTAMP_PATTERN.match(timestamp)
+    if match:
+        naive, sign, offset, hours, minutes = match.groups()
+    else:
+        _raise()
+
+    if sign == 'Z' and not offset:
+        sign = '+'
+        offset = '0000'
+    elif sign in ['+', '-'] and offset:
+        offset = hours + minutes
+    else:
+        _raise()
+
+    date_time = datetime.strptime(naive + sign + offset, TIME_FORMAT)
+    return int(date_time.timestamp())
 
 
 def consolidate_data(

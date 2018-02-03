@@ -80,6 +80,10 @@ def define_cmdline_arguments(parser: argparse.ArgumentParser):
         help='''CSV file that lists package name and repository name in
             a column each. The file should not have a header.''')
     parser.add_argument(
+        'RENAMED_REPOS_LIST', type=argparse.FileType('r'),
+        help='''CSV file which lists GitHub IDs and new repo names of some
+            renamed repos.''')
+    parser.add_argument(
         '-o', '--output', type=argparse.FileType('w'), default=sys.stdout,
         help='File to write output CSV to. Default: stdout.')
     parser.set_defaults(func=_main)
@@ -92,13 +96,16 @@ def _main(args: argparse.Namespace):
     __log__.info('NEW_REPO_LIST: %s', args.NEW_REPO_LIST.name)
     __log__.info('MIRRORED_REPO_LIST: %s', args.MIRRORED_REPO_LIST.name)
     __log__.info('PACKAGE_LIST: %s', args.PACKAGE_LIST.name)
+    __log__.info('RENAMED_REPOS_LIST: %s', args.RENAMED_REPOS_LIST.name)
     __log__.info('--output: %s', args.output.name)
     __log__.info('------- Arguments end -------')
 
     packages_by_repo = parse_repo_to_package_file(args.PACKAGE_LIST)
+    renamed_repos = {row['github_id']: row for row in csv.DictReader(
+        args.RENAMED_REPOS_LIST)}
     data = consolidate_data(
         args.ORIGINAL_REPO_LIST, args.NEW_REPO_LIST, args.MIRRORED_REPO_LIST,
-        packages_by_repo)
+        renamed_repos, packages_by_repo)
     writer = csv.DictWriter(args.output, FIELDNAMES)
     writer.writeheader()
     num_repos = 0

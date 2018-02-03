@@ -101,5 +101,8 @@ def _main(args: argparse.Namespace):
         packages_by_repo)
     writer = csv.DictWriter(args.output, FIELDNAMES)
     writer.writeheader()
+    num_repos = 0
     for row in data:
+        num_repos += 1
         writer.writerow(row)
+    __log__.info('Number of successfully matched repos: %d', num_repos)

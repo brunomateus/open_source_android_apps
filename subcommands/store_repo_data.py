@@ -95,21 +95,31 @@ def iter_commits(gitlab_project: Project) -> Iterator[str]:
         An iterator over commit data to store in CSV file.
     """
     for commit in gitlab_project.commits.list(all=True, as_list=False):
+        attr = commit.attributes
+        stats = attr.get('stats', {})
+        if 'authored_date' in attr:
+            authored = parse_iso8601(attr.get('authored_date'))
+        else:
+            authored = None
+        if 'committed_date' in attr:
+            committed = parse_iso8601(attr.get('committed_date'))
+        else:
+            committed = None
         yield {
-            'id': commit.id,
-            'short_id': commit.short_id,
-            'title': commit.title,
-            'message': commit.message,
-            'additions': commit.stats.get('additions'),
-            'deletions': commit.stats.get('deletions'),
-            'total': commit.stats.get('total'),
-            'author_email': commit.author_email,
-            'author_name': commit.author_name,
-            'committer_email': commit.committer_email,
-            'committer_name': commit.committer_name,
-            'authored_date': parse_iso8601(commit.authored_date),
-            'committed_date': parse_iso8601(commit.committed_date),
-            'parent_ids': ','.join(commit.parent_ids),
+            'id': attr.get('id'),
+            'short_id': attr.get('short_id'),
+            'title': attr.get('title'),
+            'message': attr.get('message'),
+            'additions': stats.get('additions'),
+            'deletions': stats.get('deletions'),
+            'total': stats.get('total'),
+            'author_email': attr.get('author_email'),
+            'author_name': attr.get('author_name'),
+            'committer_email': attr.get('committer_email'),
+            'committer_name': attr.get('committer_name'),
+            'authored_date': authored,
+            'committed_date': committed,
+            'parent_ids': ','.join(attr.get('parent_ids')),
             }
 
 

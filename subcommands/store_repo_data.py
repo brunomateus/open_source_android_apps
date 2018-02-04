@@ -246,6 +246,11 @@ def store_repository_info(csv_file: IO[str], gitlab: Gitlab, outdir: str):
             continue
 
         write_csv(
+            repo_dir, 'snapshot.csv',
+            ['web_url', 'created_at'],
+            [project.web_url, project.created_at])
+
+        write_csv(
             repo_dir, 'commits.csv',
             [
                 'id', 'short_id', 'title', 'message', 'additions',

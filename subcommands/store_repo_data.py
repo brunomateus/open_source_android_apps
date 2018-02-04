@@ -137,6 +137,8 @@ def find_paths(pattern: str, file_pattern: str, branch: str, git: BareGit):
     :returns List[str]:
         list of path names.
     """
+    if not branch:
+        return []
     search_results = git.grep(pattern, branch, file_pattern)
     paths = sorted(map(lambda m: m[1], search_results))
     groups = itertools.groupby(paths)

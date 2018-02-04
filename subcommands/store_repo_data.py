@@ -138,6 +138,7 @@ def find_paths(pattern: str, file_pattern: str, branch: str, git: BareGit):
         list of path names.
     """
     if not branch:
+        __log__.warning('Branch is None for %s', git.git_dir)
         return []
     search_results = git.grep(pattern, branch, file_pattern)
     paths = sorted(map(lambda m: m[1], search_results))

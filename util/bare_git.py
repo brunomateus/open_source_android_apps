@@ -92,7 +92,7 @@ class BareGit(object):
             command, options, self.git_options + git_options, self.BIN_GIT)
         result = self.execute(git_command)
         if result.returncode:
-            __log__.error(
+            __log__.debug(
                 'Git command returned status %d.\ncommand: %s\nstderr: %s',
                 result.returncode, git_command, result.stderr)
         return result.stdout, result.returncode

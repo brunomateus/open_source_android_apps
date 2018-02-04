@@ -9,7 +9,7 @@ import logging
 import os
 from typing import IO, List
 
-from gitlab import Gitlab
+from gitlab import Gitlab, GitlabGetError
 from gitlab.v4.objects import Project
 
 from util.bare_git import BareGit
@@ -212,6 +212,9 @@ def add_commit_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
                 'short_id': commit.short_id,
                 'title': commit.title,
                 'message': commit.message,
+                'additions': commit.stats.get('additions'),
+                'deletions': commit.stats.get('deletions'),
+                'total': commit.stats.get('total'),
                 },
             'author': {
                 'email': commit.author_email,
@@ -250,6 +253,8 @@ def add_commit_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
                 MERGE (p:Commit {id: {parent}})
                 CREATE (c)-[:PARENT]->(p)
                 ''', parent=parent, child=commit.id)
+
+        __log__.debug('Created commit %s', parameters['commit']['id'])
 
 
 def add_paths_property(
@@ -438,11 +443,20 @@ def add_repository_info(
                 'Project %s does not exist. Clone status: %s',
                 row['full_name'], row['clone_status'])
             continue
-        __log__.info('Create repo info')
+        __log__.info('Create repo info: %s', (
+            row['id'], row['full_name'],
+            row['clone_project_id'], row['clone_project_path']))
         packages = row['packages'].split(',')
         __log__.info('Found packages: %s', packages)
         add_app_data(packages, play_details_dir, neo4j)
-        project = gitlab.projects.get(int(row['clone_project_id']))
+        try:
+            project = gitlab.projects.get(int(row['clone_project_id']))
+        except GitlabGetError as e:
+            __log__.exception(
+                'Could not get Gitlab project with ID: %s', row['clone_project_id'])
+            __log__.error('These are repository details: %s', row)
+            __log__.error('%s\n%s', e, e.response_body)
+            continue
         node = add_repository_node(row, project, neo4j)
         __log__.info('Created :GitHubRepository node with id %d', node.id)
         add_commit_nodes(project, node.id, neo4j)
@@ -452,7 +466,7 @@ def add_repository_info(
         add_tag_nodes(project, node.id, neo4j)
         __log__.info('Created :Tag nodes')
         add_implementation_properties(
-            project, node.id, packages, gitlab.repository_prefix, neo4j)
+            project, node.id, packages, neo4j, gitlab.repository_prefix)
     add_fork_relationships(neo4j)
 
 

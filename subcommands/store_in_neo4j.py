@@ -67,8 +67,9 @@ def format_repository_data(meta_data: dict, snapshot: Project) -> dict:
         A dictionary of properties of the node to create.
     """
     return {
+        'id': meta_data['id'],
         'owner': meta_data['owner_login'],
-        'name': meta_data['renamed_to'] or meta_data['name'],
+        'name': meta_data['name'],
         'snapshot': snapshot.web_url,
         'snapshotTimestamp': parse_iso8601(snapshot.created_at),
         'description': meta_data['description'],

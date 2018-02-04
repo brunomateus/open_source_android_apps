@@ -7,7 +7,7 @@ import csv
 import itertools
 import logging
 import os
-from typing import IO, Set
+from typing import IO, List
 
 from gitlab import Gitlab
 from gitlab.v4.objects import Project
@@ -15,8 +15,6 @@ from gitlab.v4.objects import Project
 from util.bare_git import BareGit
 from util.neo4j import Neo4j, Node
 from util.parse import \
-    parse_repo_to_package_file, \
-    get_latest_repo_name, \
     parse_google_play_info, \
     parse_iso8601
 
@@ -100,8 +98,7 @@ def add_fork_relationships(neo4j: Neo4j):
 
 
 def add_repository_node(
-        meta_data: dict, package_names: Set[str],
-        snapshot: Project, neo4j: Neo4j) -> Node:
+        meta_data: dict, snapshot: Project, neo4j: Neo4j) -> Node:
     """Add a repository and link it to all apps imnplemented by it.
 
     Does not do anything if packages_names is empty or no :App node exists
@@ -109,8 +106,6 @@ def add_repository_node(
 
     :param dict meta_data:
         Meta data of Google Play Store page parses from JSON.
-    :param Set[str] package_names:
-        a set of package names implemented by this repository.
     :param gitlab.v4.object.Project snapshot:
         Gitlab project of repository mirror.
     :param Neo4j neo4j:
@@ -120,36 +115,11 @@ def add_repository_node(
     """
     repo_data = format_repository_data(meta_data, snapshot)
     query = '''
-        MATCH (app:App)
-        WHERE app.id in {package_names}
-        CREATE
-            (app)
-            -[:IMPLEMENTED_BY]->
-            (repo:GitHubRepository {repo_properties})
+        CREATE (repo:GitHubRepository {repo_properties})
         RETURN repo
         '''
-    result = neo4j.run(
-        query, package_names=list(package_names), repo_properties=repo_data)
+    result = neo4j.run(query, repo_properties=repo_data)
     return result.single()[0]
-
-
-def find_package_names(meta_data: dict, packages: dict) -> Set[str]:
-    """Find package names implemented by repository.
-
-    :param dict meta_data:
-        Dictionary containing repository meta data. Needs to include
-        `full_name`, `renamed_to` and `not_found`.
-    :param Dict[str, Set[str]] packages:
-        A mapping from repository name to set of package names in that
-        repository.
-    :returns Set[str]:
-        a set of package names implemented by this repository.
-    """
-    original_repo_name, latest_repo_name = get_latest_repo_name(meta_data)
-    __log__.info(
-        'Original repo name: %s. Latest known repo name: %s',
-        original_repo_name, latest_repo_name)
-    return packages.get(latest_repo_name, packages.get(original_repo_name))
 
 
 def add_tag_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
@@ -307,9 +277,11 @@ def add_paths_property(
         }
     query = '''
         MATCH
-            (:App {id: {package}})-[r:IMPLEMENTED_BY]->(repo:GitHubRepository)
+            (a:App {id: {package}}), (repo:GitHubRepository)
         WHERE id(repo) = {repo_id}
-        SET r += {rel_properties}
+        MERGE (a)-[r:IMPLEMENTED_BY]->(repo)
+        ON CREATE SET r = {rel_properties}
+        ON MATCH SET r += {rel_properties}
         '''
     neo4j.run(query, **parameters)
 
@@ -410,7 +382,8 @@ def add_maven_config_path(
 
 
 def add_implementation_properties(
-        project: Project, repo_node_id: int, packages: dict, neo4j: Neo4j):
+        project: Project, repo_node_id: int, packages: List[str], neo4j: Neo4j,
+        gitlab_repo_prefix: str):
     """Add properties to IMPLEMENTED_BY relationship.
 
     Find Android manifest files and build system files for app in the
@@ -421,14 +394,16 @@ def add_implementation_properties(
         Gitlab project to search.
     :param int repo_node_id:
         ID of node representing the repository.
-    :param Dict[str, Set[str]] packages:
-        A mapping from repository name to set of package names in that
-        repository.
+    :param List[str] packages:
+        A list of package names to be connected with the repository identified
+        by repo_node_id.
     :param Neo4j neo4j:
         Neo4j instance to add nodes to.
+    :param str gitlab_repo_prefix:
+        Prefix to paths of bare Git repositories of Gitlab on disk.
     """
     repository_path = os.path.join(
-        GITLAB_REPOSITORY_PATH, '{}.git'.format(project.path))
+        gitlab_repo_prefix, '{}.git'.format(project.path))
     __log__.info('Use local git repository at %s', repository_path)
     git = BareGit(repository_path)
     for package in packages:
@@ -441,15 +416,16 @@ def add_implementation_properties(
 
 
 def add_repository_info(
-        csv_file: IO[str], packages_by_repo: dict, neo4j: Neo4j,
+        csv_file: IO[str], play_details_dir: str, neo4j: Neo4j,
         gitlab: Gitlab):
     """Add data of GIT repositories to Neo4j.
 
     :param IO[str] csv_file:
         CSV file containing meta data of repositories.
-    :param dict packages_by_repo:
-        A mapping from repository name to set of package names in that
-        repository.
+    :param str play_details_dir:
+        Name of directory to include JSON files from. Filenames in this
+        directory need to have .json extension. Filename without extension is
+        assumed to be package name for details contained in file.
     :param Neo4j neo4j:
         Neo4j instance to add nodes to.
     :param Gitlab gitlab:
@@ -463,10 +439,11 @@ def add_repository_info(
                 row['full_name'], row['clone_status'])
             continue
         __log__.info('Create repo info')
-        packages = find_package_names(row, packages_by_repo)
+        packages = row['packages'].split(',')
         __log__.info('Found packages: %s', packages)
+        add_app_data(packages, play_details_dir, neo4j)
         project = gitlab.projects.get(int(row['clone_project_id']))
-        node = add_repository_node(row, packages, project, neo4j)
+        node = add_repository_node(row, project, neo4j)
         __log__.info('Created :GitHubRepository node with id %d', node.id)
         add_commit_nodes(project, node.id, neo4j)
         __log__.info('Created :Commit nodes')
@@ -474,16 +451,16 @@ def add_repository_info(
         __log__.info('Created :Branch nodes')
         add_tag_nodes(project, node.id, neo4j)
         __log__.info('Created :Tag nodes')
-        add_implementation_properties(project, node.id, packages, neo4j)
+        add_implementation_properties(
+            project, node.id, packages, gitlab.repository_prefix, neo4j)
     add_fork_relationships(neo4j)
 
 
-def add_app_data(packages_by_repo: dict, play_details_dir: str, neo4j: Neo4j):
+def add_app_data(packages: List[str], play_details_dir: str, neo4j: Neo4j):
     """Create nodes and relationships for Android apps.
 
-    :param dict packages_by_repo:
-        A mapping from repository name to set of package names in that
-        repository.
+    :param List[str] packages:
+        List of package names to create :App and :GooglePlayPage nodes for.
     :param str play_details_dir:
         Name of directory to include JSON files from. Filenames in this
         directory need to have .json extension. Filename without extension is
@@ -491,15 +468,14 @@ def add_app_data(packages_by_repo: dict, play_details_dir: str, neo4j: Neo4j):
     :param Neo4j neo4j:
         Neo4j instance to add nodes to.
     """
-    for packages in packages_by_repo.values():
+    for package in packages:
         __log__.info(
-            'Add :GooglePlayPage and :App nodes for packages: %s', packages)
-        for package in packages:
-            add_google_play_page_node(package, neo4j, play_details_dir)
-            neo4j.run(
-                '''MERGE (g:GooglePlayPage {docId: {package}})
-                CREATE (a:App {id: {package}})-[:PUBLISHED_AT]->(g)''',
-                package=package)
+            'Add :GooglePlayPage and :App nodes for package: %s', package)
+        add_google_play_page_node(package, neo4j, play_details_dir)
+        neo4j.run(
+            '''MERGE (g:GooglePlayPage {docId: {package}})
+            CREATE (a:App {id: {package}})-[:PUBLISHED_AT]->(g)''',
+            package=package)
 
 
 def define_cmdline_arguments(parser: argparse.ArgumentParser):
@@ -507,10 +483,6 @@ def define_cmdline_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         'PLAY_STORE_DETAILS_DIR', type=str,
         help='Directory containing JSON files with details from Google Play.')
-    parser.add_argument(
-        'PACKAGE_LIST', type=argparse.FileType('r'),
-        help='''CSV file that lists package name and repository name in
-            a column each. The file should not have a header.''')
     parser.add_argument(
         'REPOSITORY_LIST', type=argparse.FileType('r'),
         help='''CSV file that lists meta data for repositories and their
@@ -537,7 +509,6 @@ def _main(args: argparse.Namespace):
     """Pass arguments to respective function."""
     __log__.info('------- Arguments: -------')
     __log__.info('PLAY_STORE_DETAILS_DIR: %s', args.PLAY_STORE_DETAILS_DIR)
-    __log__.info('PACKAGE_LIST: %s', args.PACKAGE_LIST.name)
     __log__.info('REPOSITORY_LIST: %s', args.REPOSITORY_LIST.name)
     __log__.info('--gitlab-repos-dir: %s', args.gitlab_repos_dir)
     __log__.info('--gitlab-host: %s', args.gitlab_host)
@@ -551,12 +522,8 @@ def _main(args: argparse.Namespace):
     __log__.info('Read Neo4j password from environment')
 
     gitlab = Gitlab(args.gitlab_host, api_version=4)
+    gitlab.repository_prefix = args.gitlab_repos_dir
 
     with Neo4j(NEO4J_HOST, neo4j_user, neo4j_password, NEO4J_PORT) as neo4j:
-        packages_by_repo = parse_repo_to_package_file(args.PACKAGE_LIST)
-        __log__.info(
-            'Read packages in %d repos from %s', len(packages_by_repo),
-            args.PACKAGE_LIST)
-        add_app_data(packages_by_repo, args.PLAY_STORE_DETAILS_DIR, neo4j)
         add_repository_info(
-            args.REPOSITORY_LIST, packages_by_repo, neo4j, gitlab)
+            args.REPOSITORY_LIST, args.PLAY_STORE_DETAILS_DIR, neo4j, gitlab)

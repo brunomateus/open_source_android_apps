@@ -26,6 +26,7 @@ SUB_COMMANDS = [
     'clone',
     'draw_commits',
     'consolidate_data',
+    'store_repo_data',
     'store_in_neo4j',
     ]
 

@@ -26,35 +26,6 @@ GITLAB_HOST = 'http://145.108.225.21'
 GITLAB_REPOSITORY_PATH = '/var/opt/gitlab/git-data/repositories/gitlab'
 
 
-def format_repository_data(meta_data: dict, snapshot: Project) -> dict:
-    """Format repository data for insertion into Neo4j.
-
-    :param dict meta_data:
-        Meta data of Google Play Store page parses from JSON.
-    :param gitlab.v4.object.Project snapshot:
-        Gitlab project of repository mirror.
-    :returns dict:
-        A dictionary of properties of the node to create.
-    """
-    return {
-        'id': meta_data['id'],
-        'owner': meta_data['owner_login'],
-        'name': meta_data['name'],
-        'snapshot': snapshot.web_url,
-        'snapshotTimestamp': parse_iso8601(snapshot.created_at),
-        'description': meta_data['description'],
-        'createdAt': meta_data['created_at'],
-        'forksCount': meta_data['forks_count'],
-        'stargazersCount': meta_data['stargazers_count'],
-        'subscribersCount': meta_data['subscribers_count'],
-        'watchersCount': meta_data['watchers_count'],
-        'networkCount': meta_data['network_count'],
-        'ownerType': meta_data['owner_type'],
-        'parentId': meta_data['parent_id'],
-        'sourceId': meta_data['source_id']
-        }
-
-
 def iter_tags(gitlab_project: Project) -> Iterator[str]:
     """Iterator over tag meta-data in gitlab_project.
 

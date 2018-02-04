@@ -85,6 +85,20 @@ def format_repository_data(meta_data: dict, snapshot: Project) -> dict:
         }
 
 
+def add_fork_relationships(neo4j: Neo4j):
+    """Add FORK_OF relationships between existing GitHubRepository entities.
+
+    :param Neo4j neo4j:
+        Neo4j instance to add nodes to.
+    """
+    query = '''
+        MATCH (fork:GitHubRepository), (parent:GitHubRepository)
+        WHERE fork.parentId = parent.id OR fork.sourceId = parent.id
+        CREATE (fork)-[:FORKS]->(parent)
+        '''
+    neo4j.run(query)
+
+
 def add_repository_node(
         meta_data: dict, package_names: Set[str],
         snapshot: Project, neo4j: Neo4j) -> Node:
@@ -461,6 +475,7 @@ def add_repository_info(
         add_tag_nodes(project, node.id, neo4j)
         __log__.info('Created :Tag nodes')
         add_implementation_properties(project, node.id, packages, neo4j)
+    add_fork_relationships(neo4j)
 
 
 def add_app_data(packages_by_repo: dict, play_details_dir: str, neo4j: Neo4j):

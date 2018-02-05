@@ -4,15 +4,10 @@ Use -h or --help for more information.
 """
 import argparse
 import csv
-import itertools
 import logging
 import os
-from typing import IO, List
+from typing import Dict, IO, List
 
-from gitlab import Gitlab, GitlabGetError
-from gitlab.v4.objects import Project
-
-from util.bare_git import BareGit
 from util.neo4j import Neo4j, Node
 from util.parse import \
     parse_google_play_info, \
@@ -54,22 +49,26 @@ def add_google_play_page_node(
     return neo4j.create_node('GooglePlayPage', **google_play_info)
 
 
-def format_repository_data(meta_data: dict, snapshot: Project) -> dict:
+def format_repository_data(meta_data: dict, snapshot: dict) -> dict:
     """Format repository data for insertion into Neo4j.
 
     :param dict meta_data:
         Meta data of Google Play Store page parses from JSON.
-    :param gitlab.v4.object.Project snapshot:
-        Gitlab project of repository mirror.
+    :param dict snapshot:
+        Information about Gitlab project that hosts snapshot of the repository.
     :returns dict:
         A dictionary of properties of the node to create.
     """
+    if snapshot.get('created_at'):
+        timestamp = parse_iso8601(snapshot.get('created_at'))
+    else:
+        timestamp = None
     return {
         'id': meta_data['id'],
         'owner': meta_data['owner_login'],
         'name': meta_data['name'],
-        'snapshot': snapshot.web_url,
-        'snapshotTimestamp': parse_iso8601(snapshot.created_at),
+        'snapshot': snapshot.get('web_url'),
+        'snapshotTimestamp': timestamp,
         'description': meta_data['description'],
         'createdAt': meta_data['created_at'],
         'forksCount': meta_data['forks_count'],
@@ -98,7 +97,7 @@ def add_fork_relationships(neo4j: Neo4j):
 
 
 def add_repository_node(
-        meta_data: dict, snapshot: Project, neo4j: Neo4j) -> Node:
+        meta_data: dict, snapshots: List[dict], neo4j: Neo4j) -> Node:
     """Add a repository and link it to all apps imnplemented by it.
 
     Does not do anything if packages_names is empty or no :App node exists
@@ -106,13 +105,14 @@ def add_repository_node(
 
     :param dict meta_data:
         Meta data of Google Play Store page parses from JSON.
-    :param gitlab.v4.object.Project snapshot:
-        Gitlab project of repository mirror.
+    :param List[Dict[str, str]] snapshots:
+        List of snapshots data. Must be length 1.
     :param Neo4j neo4j:
         Neo4j instance to add nodes to.
     :returns Node:
         The node created for the repository.
     """
+    snapshot = snapshots[0] if snapshots else {}
     repo_data = format_repository_data(meta_data, snapshot)
     query = '''
         CREATE (repo:GitHubRepository {repo_properties})
@@ -122,26 +122,26 @@ def add_repository_node(
     return result.single()[0]
 
 
-def add_tag_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
+def add_tag_nodes(tags: List[dict], repo_node_id: int, neo4j: Neo4j):
     """Create nodes representing GIT tags of a repository.
 
     Creates a node for each tag and links it with the repository identified
     by repo_node_id and the commit the tag points to.
 
-    :param gitlab.v4.object.Project gitlab_project:
-        Gitlab project to retrieve tags from.
+    :param List[Dict[str, str]] tags:
+        List of tag data.
     :param int repo_node_id:
         ID of node the tags should be linked to.
     :param Neo4j neo4j:
         Neo4j instance to add nodes to.
     """
-    for tag in gitlab_project.tags.list(all=True, as_list=False):
+    for tag in tags:
         parameters = {
-            'commit_hash': tag.commit['id'],
+            'commit_hash': tag.get('commit_hash'),
             'repo_id': repo_node_id,
             'tag_details': {
-                'name': tag.name,
-                'message': tag.message,
+                'name': tag.get('tag_name'),
+                'message': tag.get('tag_message'),
                 },
             }
 
@@ -155,26 +155,25 @@ def add_tag_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
             ''', **parameters)
 
 
-def add_branche_nodes(
-        gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
+def add_branche_nodes(branches: List[dict], repo_node_id: int, neo4j: Neo4j):
     """Create nodes representing GIT branches of a repository.
 
     Creates a node for each branch and links it with the repository identified
     by repo_node_id and the commit the branch points to.
 
-    :param gitlab.v4.object.Project gitlab_project:
-        Gitlab project to retrieve branches from.
+    :param List[Dict[str, str]] branches:
+        List of information on branches.
     :param int repo_node_id:
         ID of node the branches should be linked to.
     :param Neo4j neo4j:
         Neo4j instance to add nodes to.
     """
-    for branch in gitlab_project.branches.list(all=True, as_list=False):
+    for branch in branches:
         parameters = {
-            'commit_hash': branch.commit['id'],
+            'commit_hash': branch.get('commit_hash'),
             'repo_id': repo_node_id,
             'branch_details': {
-                'name': branch.name,
+                'name': branch.get('branch_name'),
                 },
             }
 
@@ -188,7 +187,7 @@ def add_branche_nodes(
             ''', **parameters)
 
 
-def add_commit_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
+def add_commit_nodes(commits: List[dict], repo_node_id: int, neo4j: Neo4j):
     """Create nodes representing GIT commits of a repository.
 
     Creates a node for each commit and links it with  the repository identified
@@ -197,35 +196,35 @@ def add_commit_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
     Also creates relationships to author, committer and parent commits. Creates
     each of these in turn unless they exist already.
 
-    :param gitlab.v4.object.Project gitlab_project:
-        Gitlab project to retrieve commits from.
+    :param List[Dict[str, str]] commits:
+        List of data of commits.
     :param int repo_node_id:
         ID of node the commits should be linked to.
     :param Neo4j neo4j:
         Neo4j instance to add nodes to.
     """
-    for commit in gitlab_project.commits.list(all=True, as_list=False):
+    for commit in commits:
         parameters = {
             'repo_id': repo_node_id,
             'commit': {
-                'id': commit.id,
-                'short_id': commit.short_id,
-                'title': commit.title,
-                'message': commit.message,
-                'additions': commit.stats.get('additions'),
-                'deletions': commit.stats.get('deletions'),
-                'total': commit.stats.get('total'),
+                'id': commit.get('id'),
+                'short_id': commit.get('short_id'),
+                'title': commit.get('title'),
+                'message': commit.get('message'),
+                'additions': commit.get('additions'),
+                'deletions': commit.get('deletions'),
+                'total': commit.get('total'),
                 },
             'author': {
-                'email': commit.author_email,
-                'name': commit.author_name,
+                'email': commit.get('author_email'),
+                'name': commit.get('author_name'),
                 },
             'committer': {
-                'email': commit.committer_email,
-                'name': commit.committer_name,
+                'email': commit.get('committer_email'),
+                'name': commit.get('committer_name'),
                 },
-            'authored_date': parse_iso8601(commit.authored_date),
-            'committed_date': parse_iso8601(commit.committed_date),
+            'authored_date': commit.get('authored_date'),
+            'committed_date': commit.get('committed_date'),
             }
 
         neo4j.run(
@@ -246,13 +245,13 @@ def add_commit_nodes(gitlab_project: Project, repo_node_id: int, neo4j: Neo4j):
                 (committer)-[:COMMITS {timestamp: {committed_date}}]->(commit)
             ''', **parameters)
 
-        for parent in commit.parent_ids:
+        for parent in commit.get('parent_ids').split(','):
             neo4j.run(
                 '''
                 MATCH (c:Commit {id: {child}})
                 MERGE (p:Commit {id: {parent}})
                 CREATE (c)-[:PARENT]->(p)
-                ''', parent=parent, child=commit.id)
+                ''', parent=parent, child=commit.get('id'))
 
         __log__.debug('Created commit %s', parameters['commit']['id'])
 
@@ -291,112 +290,18 @@ def add_paths_property(
     neo4j.run(query, **parameters)
 
 
-def find_paths(pattern: str, file_pattern: str, branch: str, git: BareGit):
-    """Find files in GIT repository.
-
-    :param str pattern:
-        Search pattern.
-    :param str file_pattern:
-        Pathspec to restrict files matched in GIT repository.
-    :param str branch:
-        Refspec to base search in GIT repository on.
-    :param BareGit git:
-        GIT repository to search.
-    :returns List[str]:
-        list of path names.
-    """
-    search_results = git.grep(pattern, branch, file_pattern)
-    paths = sorted(map(lambda m: m[1], search_results))
-    groups = itertools.groupby(paths)
-    return [group[0] for group in groups]
-
-
-def add_manifest_path(
-        repo_node_id: int, package_name: str, branch: str, git: BareGit,
-        neo4j: Neo4j):
-    """Add paths of AndroidManifest.xml files to :IMPLEMENTED_BY relationship.
-
-    :param int repo_node_id:
-        Identifier for :GitHubRepository node which the :IMPLEMENTED_BY
-        relationship points to.
-    :param str package_name:
-        Package name of :App node.
-    :param str branch:
-        Refspec to base search in GIT repository on.
-    :param BareGit git:
-        GIT repository to search.
-    :param Neo4j neo4j:
-        Neo4j instance to add nodes to.
-    """
-    pattern = 'package="{}"'.format(package_name)
-    paths = find_paths(pattern, '*AndroidManifest.xml', branch, git)
-    if paths:
-        __log__.info('Found manifests: %s', paths)
-        add_paths_property(
-            {'manifestPaths': paths}, repo_node_id, package_name, neo4j)
-
-
-def add_gradle_config_path(
-        repo_node_id: int, package_name: str, branch: str, git: BareGit,
-        neo4j: Neo4j):
-    """Add paths of gradle configuration files to :IMPLEMENTED_BY relationship.
-
-    :param int repo_node_id:
-        Identifier for :GitHubRepository node which the :IMPLEMENTED_BY
-        relationship points to.
-    :param str package_name:
-        Package name of :App node.
-    :param str branch:
-        Refspec to base search in GIT repository on.
-    :param BareGit git:
-        GIT repository to search.
-    :param Neo4j neo4j:
-        Neo4j instance to add nodes to.
-    """
-    pattern = 'applicationId *.{}.'.format(package_name)
-    paths = find_paths(pattern, '*build.gradle', branch, git)
-    if paths:
-        __log__.info('Found gradle files: %s', paths)
-        add_paths_property(
-            {'gradleConfigPaths': paths}, repo_node_id, package_name, neo4j)
-
-
-def add_maven_config_path(
-        repo_node_id: int, package_name: str, branch: str, git: BareGit,
-        neo4j: Neo4j):
-    """Add paths of Maven configuration files to :IMPLEMENTED_BY relationship.
-
-    :param int repo_node_id:
-        Identifier for :GitHubRepository node which the :IMPLEMENTED_BY
-        relationship points to.
-    :param str package_name:
-        Package name of :App node.
-    :param str branch:
-        Refspec to base search in GIT repository on.
-    :param BareGit git:
-        GIT repository to search.
-    :param Neo4j neo4j:
-        Neo4j instance to add nodes to.
-    """
-    pattern = r'<groupId>{}<\/groupId>'.format(package_name)
-    paths = find_paths(pattern, '*pom.xml', branch, git)
-    if paths:
-        __log__.info('Found maven files: %s', paths)
-        add_paths_property(
-            {'mavenConfigPaths': paths}, repo_node_id, package_name, neo4j)
-
-
 def add_implementation_properties(
-        project: Project, repo_node_id: int, packages: List[str], neo4j: Neo4j,
-        gitlab_repo_prefix: str):
+        properties: List[dict], repo_node_id: int, packages: List[str],
+        neo4j: Neo4j):
     """Add properties to IMPLEMENTED_BY relationship.
 
     Find Android manifest files and build system files for app in the
     repository and add their paths as properties to the IMPLEMENTED_BY
     relationship.
 
-    :param gitlab.v4.object.Project gitlab_project:
-        Gitlab project to search.
+    :param List[Dict[str, str]] properties:
+        A list of dictionaries. Each has a key 'package' and other keys that
+        need to be added to a relation with that package.
     :param int repo_node_id:
         ID of node representing the repository.
     :param List[str] packages:
@@ -404,25 +309,41 @@ def add_implementation_properties(
         by repo_node_id.
     :param Neo4j neo4j:
         Neo4j instance to add nodes to.
-    :param str gitlab_repo_prefix:
-        Prefix to paths of bare Git repositories of Gitlab on disk.
     """
-    repository_path = os.path.join(
-        gitlab_repo_prefix, '{}.git'.format(project.path))
-    __log__.info('Use local git repository at %s', repository_path)
-    git = BareGit(repository_path)
-    for package in packages:
-        add_manifest_path(
-            repo_node_id, package, project.default_branch, git, neo4j)
-        add_gradle_config_path(
-            repo_node_id, package, project.default_branch, git, neo4j)
-        add_maven_config_path(
-            repo_node_id, package, project.default_branch, git, neo4j)
+    if {pp['package'] for pp in properties} != set(packages):
+        __log__.error(
+            'Packages stored with paths do not match. '
+            'Original: %s. Properties: %s', packages, properties)
+        # Create empty IMPLEMENTED_BY relations to make sure all packages are
+        # connected.
+        for package in packages:
+            add_paths_property({}, repo_node_id, package, neo4j)
+
+    for attr in properties:
+        package = attr['package']
+        del attr['package']
+        add_paths_property(attr, repo_node_id, package, neo4j)
+
+
+def read_csv(prefix: str, filename: str) -> List[Dict[str, str]]:
+    """List of all rows of a CSV file as dictionaries.
+
+    :param str prefix:
+        Directory of CSV file.
+    :param str filename:
+        Filename of CSV file.
+    :returns List[Dict[str, str]]:
+        List of rows of CSV file as dictionaries.
+    """
+    path = os.path.join(prefix, filename)
+    with open(path) as csv_file:
+        csv_reader = csv.DictReader(csv_file)
+        return list(csv_reader)
 
 
 def add_repository_info(
         csv_file: IO[str], play_details_dir: str, neo4j: Neo4j,
-        gitlab: Gitlab):
+        repo_details_dir: str):
     """Add data of GIT repositories to Neo4j.
 
     :param IO[str] csv_file:
@@ -433,40 +354,32 @@ def add_repository_info(
         assumed to be package name for details contained in file.
     :param Neo4j neo4j:
         Neo4j instance to add nodes to.
-    :param Gitlab gitlab:
-        Gitlab instance to query repository data from.
+    :param str repo_details_dir:
+        Path in which CSV files with repository details, such as commits,
+        branches, etc are stored.
     """
     csv_reader = csv.DictReader(csv_file)
     for row in csv_reader:
-        if row['clone_status'] != 'Success':
-            __log__.warning(
-                'Project %s does not exist. Clone status: %s',
-                row['full_name'], row['clone_status'])
-            continue
         __log__.info('Create repo info: %s', (
             row['id'], row['full_name'],
             row['clone_project_id'], row['clone_project_path']))
         packages = row['packages'].split(',')
         __log__.info('Found packages: %s', packages)
         add_app_data(packages, play_details_dir, neo4j)
-        try:
-            project = gitlab.projects.get(int(row['clone_project_id']))
-        except GitlabGetError as e:
-            __log__.exception(
-                'Could not get Gitlab project with ID: %s', row['clone_project_id'])
-            __log__.error('These are repository details: %s', row)
-            __log__.error('%s\n%s', e, e.response_body)
-            continue
-        node = add_repository_node(row, project, neo4j)
+
+        path = os.path.join(repo_details_dir, row['id'])
+
+        snapshots = read_csv(path, 'snapshot.csv')
+        node = add_repository_node(row, snapshots, neo4j)
         __log__.info('Created :GitHubRepository node with id %d', node.id)
-        add_commit_nodes(project, node.id, neo4j)
+        add_commit_nodes(read_csv(path, 'commits.csv'), node.id, neo4j)
         __log__.info('Created :Commit nodes')
-        add_branche_nodes(project, node.id, neo4j)
+        add_branche_nodes(read_csv(path, 'branches.csv'), node.id, neo4j)
         __log__.info('Created :Branch nodes')
-        add_tag_nodes(project, node.id, neo4j)
+        add_tag_nodes(read_csv(path, 'tags.csv'), node.id, neo4j)
         __log__.info('Created :Tag nodes')
         add_implementation_properties(
-            project, node.id, packages, neo4j, gitlab.repository_prefix)
+            read_csv(path, 'paths.csv'), node.id, packages, neo4j)
     add_fork_relationships(neo4j)
 
 
@@ -498,17 +411,12 @@ def define_cmdline_arguments(parser: argparse.ArgumentParser):
         'PLAY_STORE_DETAILS_DIR', type=str,
         help='Directory containing JSON files with details from Google Play.')
     parser.add_argument(
+        'REPO_DETAILS_DIR', type=str,
+        help='Directory containing CSV files with details from repositories.')
+    parser.add_argument(
         'REPOSITORY_LIST', type=argparse.FileType('r'),
         help='''CSV file that lists meta data for repositories and their
         snapshots on Gitlab.''')
-    parser.add_argument(
-        '--gitlab-repos-dir', type=str, default=GITLAB_REPOSITORY_PATH,
-        help='''Local path to repositories of Gitlab user `gitlab`. Default:
-        {}'''.format(GITLAB_REPOSITORY_PATH))
-    parser.add_argument(
-        '--gitlab-host', type=str, default=GITLAB_HOST,
-        help='''Hostname Gitlab instance is running on. Default:
-        {}'''.format(GITLAB_HOST))
     parser.add_argument(
         '--neo4j-host', type=str, default=NEO4J_HOST,
         help='''Hostname Neo4j instance is running on. Default:
@@ -523,9 +431,8 @@ def _main(args: argparse.Namespace):
     """Pass arguments to respective function."""
     __log__.info('------- Arguments: -------')
     __log__.info('PLAY_STORE_DETAILS_DIR: %s', args.PLAY_STORE_DETAILS_DIR)
+    __log__.info('REPO_DETAILS_DIR: %s', args.REPO_DETAILS_DIR)
     __log__.info('REPOSITORY_LIST: %s', args.REPOSITORY_LIST.name)
-    __log__.info('--gitlab-repos-dir: %s', args.gitlab_repos_dir)
-    __log__.info('--gitlab-host: %s', args.gitlab_host)
     __log__.info('--neo4j-host: %s', args.neo4j_host)
     __log__.info('--neo4j-port: %d', args.neo4j_port)
     __log__.info('------- Arguments end -------')
@@ -535,9 +442,7 @@ def _main(args: argparse.Namespace):
     neo4j_password = os.getenv('NEO4J_PASSWORD')
     __log__.info('Read Neo4j password from environment')
 
-    gitlab = Gitlab(args.gitlab_host, api_version=4)
-    gitlab.repository_prefix = args.gitlab_repos_dir
-
     with Neo4j(NEO4J_HOST, neo4j_user, neo4j_password, NEO4J_PORT) as neo4j:
         add_repository_info(
-            args.REPOSITORY_LIST, args.PLAY_STORE_DETAILS_DIR, neo4j, gitlab)
+            args.REPOSITORY_LIST, args.PLAY_STORE_DETAILS_DIR, neo4j,
+            args.REPO_DETAILS_DIR)

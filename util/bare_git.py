@@ -24,7 +24,7 @@ class BareGit(object):
     OPTION_PATTERN = '-e'
     OPTIONS_END = '--'
     COMMAND_GREP = 'grep'
-    REGEX_GREP_OUTPUT = re.compile(r'^([^:]*):([^:]*):(.*)$')
+    REGEX_GREP_OUTPUT = re.compile(r'^([^:]*):([^:]*)(?:(.*))$')
 
     def __init__(self, repository):
         self.git_dir = repository
@@ -101,7 +101,15 @@ class BareGit(object):
         """Turn git grep output into tuples of (ref, path, match)."""
         for line in output.splitlines():
             match = self.REGEX_GREP_OUTPUT.match(line)
-            yield match.groups()
+            # TODO: Find out how to match the colon at the beginning of the
+            #       non-capturing group, so that match.group(3) does not
+            #       contain the initial colon.
+            yield (match.group(1), match.group(2), match.group(3).lstrip(':'))
+
+    @staticmethod
+    def _avoid_glob(argument):
+        """Surround argument with single quotes to avoid globbing."""
+        return "'{}'".format(argument)
 
     def grep(
             self, pattern, treespec, pathspec='', options=None,
@@ -135,9 +143,9 @@ class BareGit(object):
             options = []
         if not git_options:
             git_options = []
-        options += [self.OPTION_PATTERN, "'{}'".format(pattern), treespec]
+        options += [self.OPTION_PATTERN, self._avoid_glob(pattern), treespec]
         if pathspec:
-            options += [self.OPTIONS_END, pathspec]
+            options += [self.OPTIONS_END, self._avoid_glob(pathspec)]
         output, status = self.git(self.COMMAND_GREP, options, git_options)
         if status == 1:
             __log__.info('Status code 1: git grep returned no results')

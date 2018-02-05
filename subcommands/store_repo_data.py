@@ -111,7 +111,7 @@ def find_paths(pattern: str, file_pattern: str, branch: str, git: BareGit):
     if not branch:
         __log__.warning('Branch is None for %s', git.git_dir)
         return []
-    search_results = git.grep(pattern, branch, file_pattern)
+    search_results = git.grep(pattern, branch, file_pattern, ['--name-only'])
     paths = sorted(map(lambda m: m[1], search_results))
     groups = itertools.groupby(paths)
     return [group[0] for group in groups]

@@ -3,9 +3,14 @@ import argparse
 import csv
 import logging
 import os
+import sys
 from typing import Iterator
 
 from util.parse import parse_google_play_info, parse_iso8601
+
+
+# Some commit messages in the dataset are excessively long
+csv.field_size_limit(sys.maxsize)
 
 
 __log__ = logging.getLogger(__name__)
@@ -69,6 +74,7 @@ COMMIT_FIELDS = [
 ]
 
 APP_FIELDS = [
+    ':LABEL',
     'id:ID',
 ]
 
@@ -161,18 +167,20 @@ def format_parent(start_id: str, end_id: str) -> dict:
 def format_contributor(input_row: dict, contributor_type: str) -> tuple:
     """Extract data for Neo4j import from input_row."""
     if contributor_type == CONTRIBUTOR_TYPE_COMMITTER:
-        key_prefix = 'committer'
+        email_key = 'author_email'
+        name_key = 'author_name'
+        time_key = 'authored_date'
         relation_type = COMMITS_RELATION
     elif contributor_type == CONTRIBUTOR_TYPE_AUTHOR:
-        key_prefix = 'authored'
+        email_key = 'committer_email'
+        name_key = 'committer_name'
+        time_key = 'committed_date'
         relation_type = AUTHORS_RELATION
     else:
         raise ValueError('Unknown contributor_type: {}'.format(
             contributor_type))
 
-    email_key = '{}_email'.format(key_prefix)
-    name_key = '{}_name'.format(key_prefix)
-    time_key = '{}_date'.format(key_prefix)
+# id,short_id,title,message,additions,deletions,total,author_name,author_email,committer_name,committer_email,authored_date,committed_date,parent_ids
 
     email = input_row[email_key]
     node_id = node_index('contr', email)
@@ -183,7 +191,7 @@ def format_contributor(input_row: dict, contributor_type: str) -> tuple:
         'name:string': input_row[name_key],
     }
     relation = format_relation(
-        relation_type, node_id, input_row['commit_hash'],
+        relation_type, node_id, input_row['id'],
         **{'timestamp:long': input_row[time_key]})
     return node_id, node, relation
 
@@ -218,7 +226,7 @@ def format_branch(input_row: dict, repo_id: str) -> tuple:
     node = {
         ':LABEL': 'Branch',
         ':ID': node_id,
-        'name:string': input_row['tag_name'],
+        'name:string': input_row['branch_name'],
     }
     belongs_relation = format_belongs_to(node_id, repo_id)
     points_relation = format_points_to(node_id, input_row['commit_hash'])
@@ -268,37 +276,40 @@ def format_commit(input_row: dict, repo_id: str) -> tuple:
     )
 
 
-def format_play_page(package_name: str, details_dir: str, mtime: int) -> tuple:
+def format_play_page(package_name: str, input_dir: str, mtime: int) -> tuple:
     """Read data for GooglePlayPage in right format."""
+    details_dir = os.path.join(input_dir, 'package_details')
     node_id = node_index('play')
     data = parse_google_play_info(package_name, details_dir)
+    if not data:
+        data = {}
     node = {
         ':LABEL': 'GooglePlayPage',
         ':ID': node_id,
         'docId:string': package_name,
-        'uri:string': data['uri'],
+        'uri:string': data.get('uri'),
         'snapshotTimestamp:long': mtime,
-        'title:string': data['title'],
-        'appCategory:string[]': ';'.join(data['appCategory']),
+        'title:string': data.get('title'),
+        'appCategory:string[]': ';'.join(data.get('appCategory') or []),
         'promotionalDescription:string':
-            escape(data['promotionalDescription']),
-        'descriptionHtml:string': escape(data['descriptionHtml']),
+            escape(data.get('promotionalDescription')),
+        'descriptionHtml:string': escape(data.get('descriptionHtml')),
         'translatedDescriptionHtml:string':
-            escape(data['translatedDescriptionHtml']),
-        'versionCode:int': data['versionCode'],
-        'versionString:string': data['versionString'],
-        'uploadDate:long': data['uploadDate'],
-        'formattedAmount:string': data['formattedAmount'],
-        'currencyCode:string': data['currencyCode'],
-        'in-app purchases:string': data['in-app purchases'],
-        'installNotes:string': data['installNotes'],
-        'starRating:float': data['starRating'],
-        'numDownloads:string': data['numDownloads'],
-        'developerName:string': data['developerName'],
-        'developerEmail:string': data['developerEmail'],
-        'developerWebsite:string': data['developerWebsite'],
-        'targetSdkVersion:int': data['targetSdkVersion'],
-        'permissions:string[]': ';'.join(data['permissions']),
+            escape(data.get('translatedDescriptionHtml')),
+        'versionCode:int': data.get('versionCode'),
+        'versionString:string': data.get('versionString'),
+        'uploadDate:long': data.get('uploadDate'),
+        'formattedAmount:string': data.get('formattedAmount'),
+        'currencyCode:string': data.get('currencyCode'),
+        'in-app purchases:string': data.get('in-app purchases'),
+        'installNotes:string': data.get('installNotes'),
+        'starRating:float': data.get('starRating'),
+        'numDownloads:string': data.get('numDownloads'),
+        'developerName:string': data.get('developerName'),
+        'developerEmail:string': data.get('developerEmail'),
+        'developerWebsite:string': data.get('developerWebsite'),
+        'targetSdkVersion:int': data.get('targetSdkVersion'),
+        'permissions:string[]': ';'.join(data.get('permissions') or []),
     }
     relation = format_relation(package_name, node_id, PUBLISHED_AT_RELATION)
     return node, relation
@@ -350,8 +361,12 @@ def iter_commit_rows(repo_id: str, input_dir: str) -> Iterator[tuple]:
     """Open commit CSV file for repo_id and format rows."""
     path = get_repository_csv_path(repo_id, input_dir, 'commits.csv')
     with open(path) as csv_file:
-        for row in csv.DictReader(csv_file):
-            yield format_commit(repo_id, row)
+        try:
+            for row in csv.DictReader(csv_file):
+                yield format_commit(row, repo_id)
+        except csv.Error as error:
+            __log__.exception('Repo ID: %d.', repo_id)
+            raise error
 
 
 def iter_repository_rows(input_dir: str) -> Iterator[tuple]:
@@ -399,8 +414,8 @@ def prepare_for_neo4j_import(input_dir: str, output_dir: str):
             output.repo(repo)
             for commit_data in iter_commit_rows(repo_id, input_dir):
                 output.commit(commit_data[0])
-                output.contributor_relation(commit_data[1])
-                output.contributor_relation(commit_data[2])
+                output.contribute_relation(commit_data[1])
+                output.contribute_relation(commit_data[2])
                 output.general_relation(commit_data[3])
                 contributors.update(commit_data[4])
                 for parent_relation in commit_data[5]:
@@ -447,7 +462,7 @@ class Output(object):
         ('commit', COMMIT_FIELDS),
         ('app', APP_FIELDS),
         ('play_page', PLAY_PAGE_FIELDS),
-        ('branche', BRANCH_FIELDS),
+        ('branch', BRANCH_FIELDS),
         ('tag', TAG_FIELDS),
         ('contributor', CONTRIBUTOR_FIELDS),
         ('general_relation', GENERAL_RELATION_FIELDS),
@@ -457,15 +472,16 @@ class Output(object):
 
     def __init__(self, directory: str):
         self.directory = directory
+        self._output = {}
         for tag, fields in self.output_type:
             self._init_output(tag, fields)
 
     def __enter__(self):
-        pass
+        return self
 
     def __exit__(self, *exception_info):
         """Close all file handles."""
-        for output in self._files.values():
+        for output in self._output.values():
             output['handle'].close()
 
     def __getattribute__(self, name):
@@ -473,8 +489,9 @@ class Output(object):
 
         Allows self.repo(row) be resolved to self.write('repo', row)
         """
-        if name in self._output:
-            return lambda row: self.write(name, row)
+        if name in object.__getattribute__(self, '_output'):
+            write = object.__getattribute__(self, 'write')
+            return lambda row: write(name, row)
         return object.__getattribute__(self, name)
 
     def _init_output(self, tag: str, fields: list):
@@ -500,10 +517,10 @@ class Output(object):
 def define_cmdline_arguments(parser: argparse.ArgumentParser):
     """Add arguments to parser."""
     parser.add_argument(
-        'input-dir', type=str,
+        'input_dir', type=str,
         help='Directory containing CSV and JSON files to convert.')
     parser.add_argument(
-        'output-dir', type=str,
+        'output_dir', type=str,
         help='Directory to store Neo4j import files in.')
     parser.set_defaults(func=_main)
 

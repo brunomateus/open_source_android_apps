@@ -439,10 +439,22 @@ def prepare_for_neo4j_import(input_dir: str, output_dir: str):
 
 
 def escape(string: str) -> str:
-    """Escape newlines and special characters."""
-    if not string:
-        return ''
-    return string.encode('unicode_escape').decode()
+    """DEACTIVATED for compatibility
+
+    Escape newlines and special characters.
+    """
+    return string
+
+
+class Neo4jDialect(csv.Dialect):
+    """A CSV dialect that is compatible with Neo4j import tools."""
+    delimiter = ','
+    doublequote = True
+    escapechar = '\\'
+    lineterminator = '\n'
+    quotechar = '"'
+    quoting = csv.QUOTE_ALL
+    skipinitialspace = False
 
 
 class Output(object):
@@ -499,7 +511,7 @@ class Output(object):
         filename = '{}s.csv'.format(tag)
         path = os.path.join(self.directory, filename)
         output_file = open(path, 'w', newline='')
-        writer = csv.DictWriter(output_file, fields)
+        writer = csv.DictWriter(output_file, fields, dialect=Neo4jDialect)
         writer.writeheader()
         self._output[tag] = {
             'handle': output_file,

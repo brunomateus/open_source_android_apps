@@ -508,7 +508,10 @@ class Output(object):
 
     def _init_output(self, tag: str, fields: list):
         """Creates csv.DictWriter and writes headers."""
-        filename = '{}s.csv'.format(tag)
+        if tag == 'branch':
+            filename = 'branches.csv'
+        else:
+            filename = '{}s.csv'.format(tag)
         path = os.path.join(self.directory, filename)
         output_file = open(path, 'w', newline='')
         writer = csv.DictWriter(output_file, fields, dialect=Neo4jDialect)

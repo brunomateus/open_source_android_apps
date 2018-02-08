@@ -57,17 +57,18 @@ def iter_branches(gitlab_project: Project) -> Iterator[str]:
             }
 
 
-def iter_commits(gitlab_project: Project) -> Iterator[str]:
+def iter_commits(project: Project) -> Iterator[str]:
     """Iterator over commit meta-data in a Gitlab project.
 
-    :param gitlab.v4.object.Project gitlab_project:
+    :param gitlab.v4.object.Project project:
         Gitlab project to retrieve commits from.
     :returns Iterator[str]:
         An iterator over commit data to store in CSV file.
     """
-    for commit in gitlab_project.commits.list(all=True, as_list=False):
+    for commit in project.commits.list(as_list=False):
         attr = commit.attributes
-        stats = attr.get('stats', {})
+        # Gitlab API does not return 'stats' when listing commits
+        stats = project.commits.get(commit.id).attributes.get('stats', {})
         if 'authored_date' in attr:
             authored = parse_iso8601(attr.get('authored_date'))
         else:

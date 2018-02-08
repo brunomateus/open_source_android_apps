@@ -180,8 +180,6 @@ def format_contributor(input_row: dict, contributor_type: str) -> tuple:
         raise ValueError('Unknown contributor_type: {}'.format(
             contributor_type))
 
-# id,short_id,title,message,additions,deletions,total,author_name,author_email,committer_name,committer_email,authored_date,committed_date,parent_ids
-
     email = input_row[email_key]
     node_id = node_index('contr', email)
     node = {

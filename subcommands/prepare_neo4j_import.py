@@ -319,7 +319,7 @@ def format_play_page(package_name: str, input_dir: str, mtime: int) -> tuple:
         'targetSdkVersion:int': data.get('targetSdkVersion'),
         'permissions:string[]': ';'.join(data.get('permissions') or []),
     }
-    relation = format_relation(package_name, node_id, PUBLISHED_AT_RELATION)
+    relation = format_relation(PUBLISHED_AT_RELATION, package_name, node_id)
     return node, relation
 
 
@@ -338,7 +338,7 @@ def format_repository(input_row: dict, snapshot: dict) -> dict:
         'snapshot:string': snapshot.get('web_url'),
         'snapshotTimestamp:long': timestamp,
         'description:string': escape(input_row['description']),
-        'createdAt:long': input_row['created_at'],
+        'createdAt:long': parse_iso8601(input_row['created_at']),
         'forksCount:int': input_row['forks_count'],
         'stargazersCount:int': input_row['stargazers_count'],
         'subscribersCount:int': input_row['subscribers_count'],
@@ -480,11 +480,14 @@ def prepare_for_neo4j_import(input_dir: str, output_dir: str):
 
 
 def escape(string: str) -> str:
-    """DEACTIVATED for compatibility
+    """Escape newlines and special characters.
 
-    Escape newlines and special characters.
+    Also strip at end of string because Neo4j import barks on it.
     """
     return string
+    if not string:
+        return ''
+    return string.rstrip().encode('unicode_escape').decode()
 
 
 class Neo4jDialect(csv.Dialect):

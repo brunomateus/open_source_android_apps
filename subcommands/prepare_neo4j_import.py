@@ -249,7 +249,7 @@ def format_app(package_name: str) -> dict:
     }
 
 
-def format_commit(input_row: dict, repo_id: str) -> tuple:
+def format_commit(input_row: dict, repo_id: str) -> dict:
     """Convert input_row for import to Neo4j."""
     node_id = input_row['id']
     node = {
@@ -274,14 +274,14 @@ def format_commit(input_row: dict, repo_id: str) -> tuple:
         format_parent(node_id, parent_id)
         for parent_id in input_row['parent_ids'].split(',')
     ]
-    return (
-        node,
-        author_relation,
-        committer_relation,
-        belongs_relation,
-        contributors,
-        parent_relations
-    )
+    return {
+        'commit': node,
+        'authors': author_relation,
+        'commits': committer_relation,
+        'belongs': belongs_relation,
+        'contributors': contributors,
+        'parents': parent_relations
+    }
 
 
 def format_play_page(package_name: str, input_dir: str, mtime: int) -> tuple:
@@ -422,21 +422,37 @@ def read_package_snapshot_times(input_dir: str) -> dict:
         return {row[0]: row[1] for row in csv.reader(input_file)}
 
 
+def add_rel_to_set(rel: dict, rel_set: set):
+    """Add a relation to a set.
+
+    Use tuple of :TYPE, :START_ID, and :END_ID as index.
+    """
+    key = rel[':TYPE'], rel[':START_ID'], rel[':END_ID']
+    rel_set[key] = rel
+
+
 def prepare_for_neo4j_import(input_dir: str, output_dir: str):
     """Convert all rows in input_file to Neo4j import."""
     contributors = {}
+    commits = {}
+    general_relations = {}
+    contribute_relations = {}
     mtimes = read_package_snapshot_times(input_dir)
     with Output(output_dir) as output:
         for repo_id, repo, packages in iter_repository_rows(input_dir):
             output.repo(repo)
-            for commit_data in iter_commit_rows(repo_id, input_dir):
-                output.commit(commit_data[0])
-                output.contribute_relation(commit_data[1])
-                output.contribute_relation(commit_data[2])
-                output.general_relation(commit_data[3])
-                contributors.update(commit_data[4])
-                for parent_relation in commit_data[5]:
-                    output.general_relation(parent_relation)
+            for commit in iter_commit_rows(repo_id, input_dir):
+                # There are duplicate commit entries. Probably because of
+                # cloned projects.
+                commits[commit['commit']['id:ID']] = commit['commit']
+                #  Also relations may or may not be duplicate. We need to
+                # deduplicate them by a tuple (type, start_id, end_id).
+                add_rel_to_set(commit['authors'], contribute_relations)
+                add_rel_to_set(commit['commits'], contribute_relations)
+                add_rel_to_set(commit['belongs'], general_relations)
+                contributors.update(commit['contributors'])
+                for parent_relation in commit['parents']:
+                    add_rel_to_set(parent_relation, general_relations)
             for package in packages:
                 output.app(format_app(package))
                 play_data = format_play_page(
@@ -455,6 +471,12 @@ def prepare_for_neo4j_import(input_dir: str, output_dir: str):
                 output.implemented_relation(paths)
         for contributor in contributors.values():
             output.contributor(contributor)
+        for commit in commits.values():
+            output.commit(commit)
+        for relation in general_relations.values():
+            output.general_relation(relation)
+        for relation in contribute_relations.values():
+            output.contribute_relation(relation)
 
 
 def escape(string: str) -> str:

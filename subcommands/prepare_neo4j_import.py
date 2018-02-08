@@ -164,6 +164,16 @@ def format_parent(start_id: str, end_id: str) -> dict:
     return format_relation(PARENT_RELATION, start_id, end_id)
 
 
+def format_implemented(input_row: dict, repo_id: str) -> dict:
+    """Format data for :IMPLEMENTED_BY relation for Neo4j import."""
+    return format_relation(
+        IMPLEMENTED_BY_RELATION, input_row['package'], repo_id, {
+            'manifestPaths:string[]': input_row['manifestPaths'],
+            'gradleConfigPaths:string[]': input_row['gradleConfigPaths'],
+            'mavenConfigPaths:string[]': input_row['mavenConfigPaths'],
+        })
+
+
 def format_contributor(input_row: dict, contributor_type: str) -> tuple:
     """Extract data for Neo4j import from input_row."""
     if contributor_type == CONTRIBUTOR_TYPE_COMMITTER:
@@ -351,8 +361,17 @@ def read_snapshot(repo_id: str, input_dir: str) -> dict:
     path = get_repository_csv_path(repo_id, input_dir, 'snapshot.csv')
     with open(path) as csv_file:
         for row in csv.DictReader(csv_file):
+            # We are only interested in the first (and only) entry.
             return row
     return {}
+
+
+def iter_implemented_rel(repo_id: str, input_dir: str) -> Iterator[dict]:
+    """Read :IMPLEMENTED_BY relation properties."""
+    path = get_repository_csv_path(repo_id, input_dir, 'paths.csv')
+    with open(path) as csv_file:
+        for row in csv.DictReader(csv_file):
+            yield format_implemented(row, repo_id)
 
 
 def iter_commit_rows(repo_id: str, input_dir: str) -> Iterator[tuple]:
@@ -432,6 +451,8 @@ def prepare_for_neo4j_import(input_dir: str, output_dir: str):
                 output.branch(branch_data[0])
                 output.general_relation(branch_data[1])
                 output.general_relation(branch_data[2])
+            for paths in iter_implemented_rel(repo_id, input_dir):
+                output.implemented_relation(paths)
         for contributor in contributors.values():
             output.contributor(contributor)
 

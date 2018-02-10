@@ -190,7 +190,7 @@ def format_contributor(input_row: dict, contributor_type: str) -> tuple:
         raise ValueError('Unknown contributor_type: {}'.format(
             contributor_type))
 
-    email = input_row[email_key]
+    email = input_row[email_key].strip()
     node_id = node_index('contr', email)
     node = {
         ':LABEL': 'Contributor',

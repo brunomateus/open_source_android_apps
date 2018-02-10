@@ -273,6 +273,7 @@ def format_commit(input_row: dict, repo_id: str) -> dict:
     parent_relations = [
         format_parent(node_id, parent_id)
         for parent_id in input_row['parent_ids'].split(',')
+        if parent_id
     ]
     return {
         'commit': node,

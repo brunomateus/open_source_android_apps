@@ -167,10 +167,14 @@ def format_parent(start_id: str, end_id: str) -> dict:
 def format_implemented(input_row: dict, repo_id: str) -> dict:
     """Format data for :IMPLEMENTED_BY relation for Neo4j import."""
     return format_relation(
-        IMPLEMENTED_BY_RELATION, input_row['package'], repo_id, {
-            'manifestPaths:string[]': input_row['manifestPaths'],
-            'gradleConfigPaths:string[]': input_row['gradleConfigPaths'],
-            'mavenConfigPaths:string[]': input_row['mavenConfigPaths'],
+        IMPLEMENTED_BY_RELATION, input_row['package'], repo_id,
+        **{
+            'manifestPaths:string[]':
+                input_row['manifestPaths'].replace(',', ';'),
+            'gradleConfigPaths:string[]':
+                input_row['gradleConfigPaths'].replace(',', ';'),
+            'mavenConfigPaths:string[]':
+                input_row['mavenConfigPaths'].replace(',', ';'),
         })
 
 

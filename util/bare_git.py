@@ -196,7 +196,7 @@ class GitHistory(BareGit):
             r'%w(0,4,4)%B%w(0,0,0)%n'  # Message indented by 4 spaces
             r"---%n'"
     )
-    OPTIONS = ['--all', '--date=raw', '--shortstat', FORMAT_OPTION]
+    HISTORY_OPTIONS = ['--all', '--date=raw', '--shortstat', FORMAT_OPTION]
 
     def iter_commits(self):
         """Iterates over all commits in the Git repository."""
@@ -212,8 +212,8 @@ class GitHistory(BareGit):
                 yield parsed
 
     def _log_all(self, start=None) -> bytes:
-        """Run git-log with GitHistory.OPTIONS."""
-        return self.log(options=self.OPTIONS)
+        """Run git-log with GitHistory.HISTORY_OPTIONS."""
+        return self.log(options=self.HISTORY_OPTIONS)
 
     @staticmethod
     def _parse_commit(commit_str: bytes) -> dict:

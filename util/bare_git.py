@@ -111,15 +111,16 @@ class BareGit(object):
     def _parse_grep_output(self, output):
         """Turn git grep output into tuples of (ref, path, match)."""
         try:
-            for line in output.decode().splitlines():
-                match = self.REGEX_GREP_OUTPUT.match(line)
+            for line in output.splitlines():
+                match = self.REGEX_GREP_OUTPUT.match(line.decode())
                 # TODO: Find out how to match the colon at the beginning of the
                 #       non-capturing group, so that match.group(3) does not
                 #       contain the initial colon.
                 yield (match.group(1), match.group(2), match.group(3).lstrip(':'))
         except UnicodeDecodeError as error:
             __log__.exception(
-                'Cannot decode to %s output: %s', error.encoding, error.object)
+                'Cannot decode to %s: %s', error.encoding, error.object)
+            __log__.debug('Entire command output was:\n%s', output)
             raise error
 
     @staticmethod
@@ -200,21 +201,28 @@ class GitHistory(BareGit):
     def iter_commits(self):
         """Iterates over all commits in the Git repository."""
         output = self._log_all()
+        self.output = output
         for commit in output.split(b'\n------\n'):
+            self.commit = commit
             if commit:
-                yield self._parse_commit(commit)
+                parsed = self._parse_commit(commit)
+                if 'WinRt' in parsed:
+                    yield commit
+                    break
+                yield parsed
 
-    def _log_all(self):
+    def _log_all(self, start=None) -> bytes:
         """Run git-log with GitHistory.OPTIONS."""
         return self.log(options=self.OPTIONS)
 
     @staticmethod
-    def _parse_commit(commit_str: str) -> dict:
+    def _parse_commit(commit_str: bytes) -> dict:
         """Parse git-log output of one commit."""
         meta, message, stats = commit_str.split(b'\n---\n')
         try:
-            commit = GitHistory._parse_meta(meta.decode(errors='replace'))
-            commit['message'] = GitHistory._unindent_message(message.decode())
+            commit = GitHistory._parse_meta(meta)
+            commit['message'] = GitHistory._unindent_message(message).decode(
+                errors='replace')
             commit.update(GitHistory._parse_stats(stats.decode()))
             return commit
         except UnicodeDecodeError as error:
@@ -223,11 +231,18 @@ class GitHistory(BareGit):
             raise error
 
     @staticmethod
-    def _parse_meta(input_str) -> dict:
+    def _parse_meta(input_str: bytes) -> dict:
         """Parse commit produced by git-log with FORMAT_OPTION."""
         commit = {}
-        for line in input_str.splitlines():
-            key, value = line.split(':', 1)
+        for line in input_str.split(b'\n'):
+            if not line.strip():
+                continue
+            key, value = line.split(b':', 1)
+            # Decode after splitting at colon because some non-ascii
+            # characters appear to work as line feeds and remove the
+            # colon.
+            key = key.decode(errors='replace')
+            value = value.decode(errors='replace')
             if key.endswith('_date'):
                 value = GitHistory._raw_date_to_timestamp(value)
             if key == 'parent_ids':
@@ -290,25 +305,29 @@ class GitHistory(BareGit):
         return {'additions': 0, 'deletions': 0, 'total': 0}
 
     @staticmethod
-    def _unindent_message(message: str, level=4) -> str:
+    def _unindent_message(message: bytes, level=4) -> bytes:
         r"""Remove level characters at beginning of every line.
 
         Example:
-        >>> GitHistory._unindent_message('    foo bar')
-        'foo bar'
-        >>> GitHistory._unindent_message('foo bar', 2)
-        'o bar'
-        >>> msg = '    foo\n        bar\n    baz'
-        >>> expected = 'foo\n    bar\nbaz'
+        >>> GitHistory._unindent_message(b'    foo bar')
+        b'foo bar'
+        >>> GitHistory._unindent_message(b'foo bar', 2)
+        b'o bar'
+        >>> msg = b'    foo\n        bar\n    baz'
+        >>> expected = b'foo\n    bar\nbaz'
         >>> GitHistory._unindent_message(msg) == expected
         True
-        >>> GitHistory._unindent_message('')
-        ''
-        >>> GitHistory._unindent_message(' \n ')
-        '\n'
+        >>> GitHistory._unindent_message(b'')
+        b''
+        >>> GitHistory._unindent_message(b' \n ')
+        b'\n'
+        >>> b'\rfoo' == GitHistory._unindent_message(b'    \rfoo')
+        True
         """
-        return '\n'.join([
-            line[level:] for line in message.splitlines()
+        return b'\n'.join([
+            # Only split at \n characters which git inserted.
+            # Keep \r. They will be converted when decoding.
+            line[level:] for line in message.split(b'\n')
         ])
 
     def _raw_date_to_timestamp(date_str: str) -> int:

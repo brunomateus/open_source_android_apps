@@ -138,6 +138,9 @@ Heuristic Matching of Google Play pages to GitHub repositories
 With a mapping from package names to repositories from BigQuery and data from
 Google Play, we try to match a unique GitHub project to each package name.
 
+To that end a list of package names with GitHub repositories the package occurs
+in is exported:
+
 ```
     SELECT
       package,
@@ -154,6 +157,8 @@ Google Play, we try to match a unique GitHub project to each package name.
     GROUP BY
       package
 ```
+
+That list is used as input for the mapping heuristics.
 
 This resulted in the final set of 8,431 open-source Android apps in 8,216
 GitHub repositories.

@@ -85,7 +85,7 @@ def bulk_fetch_details(package_names: List[str]) -> Mapping[str, Any]:
         return dict(zip(package_names, json.loads(process.stdout)))
     except subprocess.CalledProcessError as e:
         logger.warn('%s', e)
-        logger.debug(process.stderr)
+        #logger.debug(process.stderr)
         logger.debug('First package: %s; last package: %s',
                 package_names[0], package_names[-1])
         return {}

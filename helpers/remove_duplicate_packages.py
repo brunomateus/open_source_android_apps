@@ -6,14 +6,15 @@ logging.basicConfig(level=logging.INFO,
         format='%(asctime)s | [%(levelname)s] : %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 
 parser = argparse.ArgumentParser()
-parser.add_argument("package_list",
+parser.add_argument("--package_list",
         type=argparse.FileType('r'),
-        help="Path to the file that contains a list of packages extracted from AndroidManifest at Github")
+        help="Path to the file that contains a list of packages extracted from AndroidManifest at Github",
+        required=True)
 
 parser.add_argument(
         '--output', default=open('pkgs_one_manifest_repo', 'w'),
         type=argparse.FileType('w'),
-        help='Log file. Default: pkgs_one_manifest_repo.')
+        help='Output file. Default: pkgs_one_manifest_repo.')
 
 args = parser.parse_args()
 csv_reader = csv.reader(args.package_list, delimiter=',')

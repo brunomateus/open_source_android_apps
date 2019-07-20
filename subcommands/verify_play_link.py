@@ -33,7 +33,7 @@ def define_cmdline_arguments(parser: argparse.ArgumentParser):
         type=argparse.FileType('w'),
         help='Log file. Default: stderr.')
     parser.add_argument(
-        '--include-403', action='store_true',
+        '--include_403', action='store_true',
         help='''Include package names which Google Play returns
             status `403 Unauthorized` for.''')
     parser.set_defaults(func=_main)
@@ -85,4 +85,4 @@ def package_filter(input_file: IO[str], output_file: IO[str],
 def _main(args: argparse.Namespace):
     """Pass arguments to respective function."""
     __logger__.debug('Reading from %s', args.input.name)
-    package_filter(args.input, args.output, args.include_unauthorized)
+    package_filter(args.input, args.output, args.include_403)

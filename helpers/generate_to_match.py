@@ -47,7 +47,7 @@ for item in pkgs_on_play:
 to_match_file.write("package,all_repos\n")
 
 for pkg, repos in to_match.items():
-    formated_repos = ','.join(repos)
+    formated_repos = ';'.join(repos)
     to_match_file.write("{},{}\n".format(pkg.strip(),formated_repos))
 
 

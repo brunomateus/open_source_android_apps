@@ -44,7 +44,7 @@ def parse_package_to_repos_file(input_file: IO[str]) -> Dict[str, List[str]]:
         list of repository names.
     """
     return {
-        row['package']: row['all_repos'].split(',')
+        row['package']: row['all_repos'].split(';')
         for row in csv.DictReader(input_file)
         }
 

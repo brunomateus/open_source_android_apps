@@ -29,14 +29,19 @@ i = 0
 
 n_repos = len(pkgs_on_play)
 
+pkgs = set()
+
 for item in pkgs_on_play:
     i = i + 1
     pkg = item['package'].strip()
-    for row in all_repos:
-        if pkg == row['package'].strip():
-            to_match.setdefault(pkg,[]).append(row['repo_name'].strip())
-    workdone = i/n_repos
-    print("\rProgress: [{0:50s}] {1:.1f}% {2}/{3}".format('#' * int(workdone * 50), workdone*100, i, n_repos), end='', flush=True)
+
+    if pkg not in pkgs:
+        pkgs.add(pkg)
+        for row in all_repos:
+            if pkg == row['package'].strip():
+                to_match.setdefault(pkg,[]).append(row['repo_name'].strip())
+        workdone = i/n_repos
+        print("\rProgress: [{0:50s}] {1:.1f}% {2}/{3}".format('#' * int(workdone * 50), workdone*100, i, n_repos), end='', flush=True)
 
 
 to_match_file.write("package,all_repos\n")

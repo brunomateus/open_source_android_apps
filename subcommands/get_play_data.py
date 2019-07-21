@@ -31,6 +31,12 @@ DELAY = 12 # in seconds
 
 logger = logging.getLogger(__name__)
 
+failed = logging.FileHandler('failed.log', delay=True)
+failed.setLevel(logging.ERROR)
+
+logger.addHandler(failed)
+
+failed.close()
 
 T = TypeVar('T')
 
@@ -62,6 +68,11 @@ def define_cmdline_arguments(parser: argparse.ArgumentParser):
             default=NODE_GOOGLE_PLAY_CLI_BULK_BIN, type=str,
             help='Path to node-google-play-cli bulk-details binary. '
             'Default: {}'.format(NODE_GOOGLE_PLAY_CLI_BULK_BIN))
+    parser.add_argument('--bulk_size',
+            default=BULK_SIZE, type=int,
+            help='Number of apps per group. '
+            'Default: {}'.format(BULK_SIZE))
+
     parser.set_defaults(func=_main)
 
 
@@ -86,6 +97,7 @@ def bulk_fetch_details(package_names: List[str]) -> Mapping[str, Any]:
     except subprocess.CalledProcessError as e:
         logger.warn('%s', e)
         #logger.debug(process.stderr)
+        logger.error(''.join(["{}\n".format(pkg) for pkg in package_names]))
         logger.debug('First package: %s; last package: %s',
                 package_names[0], package_names[-1])
         return {}
@@ -103,6 +115,7 @@ def download_package_details(input_file: IO[str], out_dir: str):
     os.makedirs(out_dir, exist_ok=True)
 
     package_iterator = map(lambda l: l.strip(), input_file)
+    logger.debug('Bulk size = {}'.format(BULK_SIZE))
     for packages in grouper(package_iterator, BULK_SIZE):
         for package, meta_data in bulk_fetch_details(packages).items():
             filename = '{}.json'.format(package)
@@ -116,5 +129,7 @@ def _main(args: argparse.Namespace):
     """Pass arguments to respective function."""
     global NODE_GOOGLE_PLAY_CLI_BULK_BIN
     NODE_GOOGLE_PLAY_CLI_BULK_BIN = args.bulk_details_bin
+    global BULK_SIZE
+    BULK_SIZE = args.bulk_size
     logger.debug('Reading from %s', args.input.name)
     download_package_details(args.input, args.outdir)

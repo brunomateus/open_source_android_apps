@@ -63,7 +63,7 @@ for package_name, package_details in parse_package_details(details_dir):
             relevant_info['package'] = package_name
             relevant_info['name'] =  package_details.get('title')
             relevant_info['summary'] =  package_details.get('promotionalDescription')
-            relevant_info['uploadDate'] =  str(datetime.strptime(app_details.get('uploadDate'), "%b %d, %Y").date())
+            relevant_info['last_added_on'] =  str(datetime.strptime(app_details.get('uploadDate'), "%b %d, %Y").date())
             relevant_info['last_version_number'] =  app_details.get('versionCode')
             relevant_info['last_version_name'] =  app_details.get('versionString')
             relevant_info['source_repo'] =  matched_dict.get(package_name)
